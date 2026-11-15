@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     data_dir: Path = Path("data")
     database_url: str | None = None
-    timezone: str = "Europe/Lisbon"
+    timezone: str = "America/Sao_Paulo"
     log_level: str = "INFO"
     host: str = "0.0.0.0"
     port: int = 8000

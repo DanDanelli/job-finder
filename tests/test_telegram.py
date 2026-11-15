@@ -119,6 +119,13 @@ def test_proxima_execucao(agora: datetime, esperado: datetime) -> None:
     assert proxima_execucao(agora, [time(8), time(18)], LISBOA) == esperado
 
 
+def test_proxima_execucao_em_sao_paulo() -> None:
+    # UTC-3 o ano todo: 08h em São Paulo são 11h UTC.
+    agora = datetime(2026, 11, 15, 10, 0, tzinfo=UTC)
+    esperado = datetime(2026, 11, 15, 11, 0, tzinfo=UTC)
+    assert proxima_execucao(agora, [time(8), time(18)], ZoneInfo("America/Sao_Paulo")) == esperado
+
+
 def test_horarios_configuraveis_por_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("JOBFINDER_HORARIOS", '["07:30", "19:00"]')
     assert Settings().horarios == [time(7, 30), time(19)]
@@ -252,7 +259,7 @@ def test_salvas_e_status(engine: Engine) -> None:
     assert '<a href="https://remotive.com/0">A &amp; B</a>' in salvas
 
     status = acoes.texto_status(engine, pid, Settings(), agora=AGORA)
-    assert "Rodadas: 08:00, 18:00 (Europe/Lisbon)" in status
+    assert "Rodadas: 08:00, 18:00 (America/Sao_Paulo)" in status
     assert "1 novas, 1 salvas, 0 descartadas, 0 pendentes" in status
     assert "Claude no mês: US$ 0.00 de US$ 5.00" in status
 
