@@ -59,8 +59,10 @@ Dealbreakers são requisitos objetivos da vaga que a pessoa não cumpre, por exe
 pessoa pode trabalhar (remoto_a_partir_de) ou com os países aceitos para trabalho \
 presencial (paises);
 - trabalho presencial ou híbrido numa cidade ou país fora do que a pessoa aceita;
-- salário informado abaixo do mínimo da pessoa para aquele tipo de contrato (CLT ou PJ), \
-comparando só na mesma moeda e no mesmo período;
+- salário informado claramente abaixo (mais de 10%) do mínimo da pessoa para aquele tipo \
+de contrato (CLT ou PJ), na mesma moeda. Valor por hora: converta para o mês com 168 \
+horas, a não ser que a vaga diga outra carga horária; se a carga não for clara, cite a \
+conversão em gaps em vez de tratar como dealbreaker;
 - algo que as preferências da pessoa dizem explicitamente que ela não quer.
 Se houver qualquer dealbreaker, o score fica em no máximo 40.
 

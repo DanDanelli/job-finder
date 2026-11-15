@@ -173,9 +173,11 @@ def test_tipo_de_contrato() -> None:
     [
         (Salario(minimo=30_000, maximo=40_000, moeda="EUR", periodo="ano"), "salario"),
         (Salario(minimo=40_000, maximo=60_000, moeda="EUR", periodo="ano"), None),  # teto passa
-        (Salario(minimo=3_000, maximo=4_500, moeda="EUR", periodo="mes"), "salario"),  # 54k < 60k
+        (Salario(minimo=3_000, maximo=4_000, moeda="EUR", periodo="mes"), "salario"),  # 48k < 54k
+        (Salario(minimo=3_000, maximo=4_500, moeda="EUR", periodo="mes"), None),  # 54k: na margem
         (Salario(minimo=5_000, maximo=5_500, moeda="EUR", periodo="mes"), None),  # 66k
         (Salario(minimo=10, maximo=20, moeda="USD", periodo="hora"), None),  # moeda diferente
+        (Salario(minimo=10, maximo=20, moeda="EUR", periodo="hora"), None),  # hora: o LLM avalia
         (Salario(minimo=10, maximo=20, moeda="EUR", periodo=None), None),  # período desconhecido
         (None, None),  # sem salário
     ],
@@ -217,7 +219,8 @@ def test_sigla_de_estado_brasileiro_nao_vira_pais(texto: str, esperado: list[str
     ("contrato", "mensal", "motivo"),
     [
         ("tempo_integral", 22_000, None),  # CLT acima de 20k
-        ("tempo_integral", 18_000, "salario"),
+        ("tempo_integral", 19_000, None),  # dentro da margem de 10%
+        ("tempo_integral", 17_000, "salario"),
         ("contrato", 25_000, "salario"),  # PJ abaixo de 30k
         ("contrato", 32_000, None),
         (None, 22_000, None),  # sem tipo: usa o mínimo geral (20k)
@@ -235,3 +238,27 @@ def test_salario_minimo_por_tipo_de_contrato(
     )
     salario = Salario(minimo=mensal, maximo=mensal, moeda="BRL", periodo="mes")
     assert motivo_descarte(vaga(salario=salario, tipo_contrato=contrato), filtros, AGORA) == motivo
+
+
+def test_valor_por_hora_nunca_descarta_no_codigo() -> None:
+    filtros = Filtros(
+        salario_minimo_por_contrato={
+            "contrato": Salario(minimo=30_000, moeda="BRL", periodo="mes"),
+        }
+    )
+    hora = Salario(minimo=90, maximo=90, moeda="BRL", periodo="hora")
+    assert motivo_descarte(vaga(salario=hora, tipo_contrato="contrato"), filtros, AGORA) is None
+
+
+@pytest.mark.parametrize(
+    ("texto", "esperado"),
+    [
+        ("R$ 150", Salario(minimo=150, maximo=150, moeda="BRL", periodo="hora")),
+        ("R$ 120 a R$ 180 por hora", Salario(minimo=120, maximo=180, moeda="BRL", periodo="hora")),
+        ("R$ 25.000", Salario(minimo=25_000, maximo=25_000, moeda="BRL", periodo="mes")),
+    ],
+)
+def test_salario_em_reais_sem_periodo(texto: str, esperado: Salario) -> None:
+    from job_finder.pipeline.salario import interpretar_salario
+
+    assert interpretar_salario(texto) == esperado

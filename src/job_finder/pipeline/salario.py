@@ -63,7 +63,8 @@ def interpretar_salario(texto: str | None) -> Salario | None:
     periodo = next((p for regex, p in _PERIODOS if regex.search(limpo)), None)
     if periodo is None:
         if moeda == "BRL":
-            periodo = "mes"  # no Brasil o salário é anunciado por mês
+            # No Brasil o salário é anunciado por mês; "R$ 150" sozinho é valor por hora.
+            periodo = "mes" if max(valores) >= 1_000 else "hora"
         elif max(valores) >= 10_000:
             periodo = "ano"
 
