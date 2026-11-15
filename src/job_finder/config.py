@@ -86,6 +86,23 @@ class Settings(BaseSettings):
     adzuna_monthly_limit: int | None = 250
     adzuna_max_days_old: int = Field(default=7, ge=1)
 
+    # We Work Remotely (public RSS feeds, no key): one request per category feed per run.
+    # The names are the feeds' slugs (weworkremotely.com/categories/<slug>.rss).
+    weworkremotely_categories: list[str] = [
+        "remote-back-end-programming-jobs",
+        "remote-front-end-programming-jobs",
+        "remote-full-stack-programming-jobs",
+        "remote-programming-jobs",
+        "remote-devops-sysadmin-jobs",
+        "remote-design-jobs",
+        "remote-product-jobs",
+        "remote-customer-support-jobs",
+        "remote-sales-and-marketing-jobs",
+        "remote-management-and-finance-jobs",
+        "all-other-remote-jobs",
+    ]
+    weworkremotely_daily_limit: int | None = 33  # three full runs
+
     @property
     def resolved_database_url(self) -> str:
         """Database URL; by default a SQLite file inside `data_dir`."""

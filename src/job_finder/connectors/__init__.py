@@ -4,4 +4,5 @@ from job_finder.connectors import (  # noqa: F401  (registers the connectors)
     jsearch,
     remoteok,
     remotive,
+    weworkremotely,
 )

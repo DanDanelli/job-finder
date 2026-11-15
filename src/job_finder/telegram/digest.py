@@ -28,6 +28,7 @@ SOURCE_NAMES = {
     "remoteok": "Remote OK",
     "himalayas": "Himalayas",
     "adzuna": "Adzuna",
+    "weworkremotely": "We Work Remotely",
 }
 SOURCE_LINKS = {"adzuna": "https://www.adzuna.co.uk"}  # default when the job has no site
 WORK_MODES = {"remote", "hybrid", "onsite"}
