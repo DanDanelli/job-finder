@@ -163,7 +163,7 @@ def test_quota_esgotada_vira_aviso(engine: Engine) -> None:
 
     resumo = rodar(engine, [fonte])
     assert resumo.coletadas == 0
-    assert resumo.erros == ["quota diária de a esgotada (1 chamadas)"]
+    assert resumo.erros == ["quota de a esgotada (1/dia)"]
     with sessao(engine) as s:
         assert s.scalars(select(ExecucaoDB)).one().status == "erro"
 

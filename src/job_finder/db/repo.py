@@ -18,6 +18,8 @@ from job_finder.domain import (
     VagaBruta,
 )
 
+FONTE_MANUAL = "manual"  # avaliação avulsa pedida pelo bot
+
 # --- perfis -------------------------------------------------------------------
 
 
@@ -151,10 +153,19 @@ def vaga_de(db: VagaDB) -> Vaga:
 
 
 def candidatas(s: Session, perfil_id: int, desde: datetime) -> list[VagaDB]:
-    """Vagas recentes que ainda não têm match para o perfil."""
+    """Vagas recentes que ainda não têm match para o perfil.
+
+    Vagas que só chegaram por avaliação avulsa (fonte "manual") ficam de fora: são de
+    quem pediu, não entram nas rodadas dos outros perfis.
+    """
     sem_match = ~exists().where(and_(MatchDB.vaga_id == VagaDB.id, MatchDB.perfil_id == perfil_id))
+    de_alguma_fonte = exists().where(
+        and_(VagaFonteDB.vaga_id == VagaDB.id, VagaFonteDB.fonte != FONTE_MANUAL)
+    )
     recente = or_(
         VagaDB.publicada_em >= desde,
         and_(VagaDB.publicada_em.is_(None), VagaDB.criado_em >= desde),
     )
-    return list(s.scalars(select(VagaDB).where(sem_match, recente).order_by(VagaDB.id)))
+    return list(
+        s.scalars(select(VagaDB).where(sem_match, recente, de_alguma_fonte).order_by(VagaDB.id))
+    )

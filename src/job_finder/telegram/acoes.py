@@ -1,8 +1,13 @@
 """Ações do bot sobre o banco, sem dependência do Telegram (testáveis direto)."""
 
+import contextlib
+import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+import anthropic
+import httpx
 from sqlalchemy import Engine, func, select
 
 from job_finder.config import Settings
@@ -10,8 +15,16 @@ from job_finder.db import repo
 from job_finder.db.models import ExecucaoDB, FeedbackDB, MatchDB, PerfilDB, UsoQuotaDB
 from job_finder.db.session import sessao
 from job_finder.domain import StatusMatch
-from job_finder.llm.client import ClienteLLM
-from job_finder.telegram.digest import _e
+from job_finder.llm.client import (
+    ClienteLLM,
+    LimiteDeCustoAtingido,
+    RespostaInvalida,
+    criar_cliente,
+    erro_fatal,
+)
+from job_finder.telegram.digest import Botao, _e, botoes_da_vaga, formatar_vaga
+
+log = logging.getLogger(__name__)
 
 ACOES = {"s": ("salvar", StatusMatch.SALVA), "d": ("descartar", StatusMatch.DESCARTADA)}
 
@@ -133,3 +146,56 @@ def texto_status(
     if quotas:
         linhas.append("Quota hoje: " + ", ".join(f"{c} {n}" for c, n in quotas))
     return "\n".join(linhas)
+
+
+COMO_AVALIAR = (
+    "Mande o link de uma vaga que você viu (LinkedIn, Indeed, Catho, Gupy, site da "
+    "empresa...) ou cole o texto completo dela, e eu digo o fit com o seu perfil."
+)
+
+
+def avaliar_no_chat(
+    engine: Engine,
+    settings: Settings,
+    perfil_id: int,
+    mensagem: str,
+    *,
+    cliente: ClienteLLM | None = None,
+    http: httpx.Client | None = None,
+    agora: datetime | None = None,
+    resolver: Callable[[str], list[str]] | None = None,
+) -> tuple[str, list[Botao]]:
+    """Resposta do bot para um link ou texto de vaga: (texto HTML, botões)."""
+    from job_finder import avulsa
+    from job_finder.connectors.base import cliente_http
+
+    if cliente is None:
+        if settings.anthropic_api_key is None:
+            return "Sem ANTHROPIC_API_KEY configurada: não consigo avaliar vagas.", []
+        cliente = criar_cliente(engine)
+    extras = {"resolver": resolver} if resolver else {}
+    try:
+        with contextlib.nullcontext(http) if http else cliente_http() as h:
+            r = avulsa.avaliar_mensagem(
+                engine,
+                cliente,
+                perfil_id,
+                mensagem,
+                http=h,
+                modelo=settings.modelo_scoring,
+                agora=agora or datetime.now(UTC),
+                **extras,
+            )
+    except avulsa.EntradaInvalida as e:
+        return _e(str(e)), []
+    except LimiteDeCustoAtingido:
+        return "O teto de gasto com o Claude deste mês foi atingido; não consigo avaliar.", []
+    except (RespostaInvalida, anthropic.APIError, ValueError) as e:
+        log.warning("avaliação avulsa falhou: %s", e)
+        if erro_fatal(e):
+            return _e(f"Claude indisponível: {type(e).__name__}: {e}"), []
+        return "Não consegui avaliar agora. Tente de novo em alguns minutos.", []
+    texto = formatar_vaga(r.item)
+    if r.avisos:
+        texto = "\n".join(_e(a) for a in r.avisos) + "\n\n" + texto
+    return texto, botoes_da_vaga(r.item.match_id, r.item.url, r.status)

@@ -45,6 +45,15 @@ class Settings(BaseSettings):
     digest_score_minimo: int = Field(default=60, ge=0, le=100)
     digest_max_vagas: int = Field(default=10, ge=1)
 
+    # JSearch (Google for Jobs via RapidAPI).
+    # Ative com JOBFINDER_CONECTORES='["remotive","jsearch"]'.
+    jsearch_api_key: SecretStr | None = None
+    jsearch_paises: list[str] = ["br"]  # para queries sem país
+    jsearch_buscas_por_rodada: int = Field(default=3, ge=1)
+    jsearch_limite_diario: int | None = 6
+    jsearch_limite_mensal: int | None = 190  # plano grátis: ~200/mês, com folga
+    jsearch_publicadas_em: str = "3days"  # all, today, 3days, week, month
+
     @property
     def resolved_database_url(self) -> str:
         """URL do banco; por padrão um SQLite dentro de `data_dir`."""

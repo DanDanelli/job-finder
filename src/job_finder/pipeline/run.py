@@ -59,7 +59,13 @@ def coletar(
     brutas: list[VagaBruta] = []
     erros: list[str] = []
     for conector in conectores:
-        quota = Quota(engine, conector.nome, conector.limite_diario, agora.date())
+        quota = Quota(
+            engine,
+            conector.nome,
+            conector.limite_diario,
+            agora.date(),
+            limite_mensal=getattr(conector, "limite_mensal", None),
+        )
         try:
             resultado = conector.buscar(queries, quota)
         except QuotaEsgotada as e:

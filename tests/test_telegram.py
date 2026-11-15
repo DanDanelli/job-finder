@@ -318,7 +318,7 @@ def test_bot_registra_os_comandos(engine: Engine) -> None:
     registrar_handlers(app, engine, Settings(), Agendador(engine, Settings(), None))
     handlers = app.handlers[0]
     comandos = {c for h in handlers if isinstance(h, CommandHandler) for c in h.commands}
-    assert comandos == {"start", "buscar", "salvas", "pausar", "status"}
+    assert comandos == {"start", "buscar", "salvas", "pausar", "status", "avaliar"}
     assert any(isinstance(h, CallbackQueryHandler) for h in handlers)
 
     markup = teclado([Botao("👍", callback="fb:s:1"), Botao("🔗", url="https://x.example")])

@@ -6,7 +6,7 @@ exceto o /start, que responde o chat_id para o cadastro.
 
 import asyncio
 import logging
-from collections.abc import Callable, Coroutine, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from typing import Any
 
 from sqlalchemy import Engine
@@ -17,6 +17,8 @@ from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
+    MessageHandler,
+    filters,
 )
 
 from job_finder.config import Settings
@@ -49,6 +51,37 @@ class EnviadorTelegram:
             reply_markup=teclado(botoes) if botoes else None,
             disable_web_page_preview=True,
         )
+
+
+class Agrupador:
+    """Junta mensagens seguidas do mesmo chat antes de processar.
+
+    O Telegram corta um texto longo colado em várias mensagens de até 4096 caracteres;
+    sem juntar, cada pedaço viraria uma avaliação.
+    """
+
+    def __init__(self, processar: Callable[[int, str], Awaitable[None]], espera_s: float = 2.0):
+        self.processar = processar
+        self.espera_s = espera_s
+        self._partes: dict[int, list[str]] = {}
+        self._tarefas: dict[int, asyncio.Task[None]] = {}
+
+    def adicionar(self, chat_id: int, texto: str) -> None:
+        self._partes.setdefault(chat_id, []).append(texto)
+        anterior = self._tarefas.pop(chat_id, None)
+        if anterior is not None:
+            anterior.cancel()
+        self._tarefas[chat_id] = asyncio.create_task(self._depois(chat_id))
+
+    async def _depois(self, chat_id: int) -> None:
+        await asyncio.sleep(self.espera_s)
+        # Sai do registro antes de processar: uma mensagem nova não cancela o que já começou.
+        self._tarefas.pop(chat_id, None)
+        texto = "\n".join(self._partes.pop(chat_id, []))
+        try:
+            await self.processar(chat_id, texto)
+        except Exception:
+            log.exception("falha ao processar mensagem do chat %s", chat_id)
 
 
 def registrar_handlers(
@@ -94,8 +127,43 @@ def registrar_handlers(
             update,
             f"Olá, {perfil.nome}! Digest às "
             + ", ".join(h.strftime("%H:%M") for h in settings.horarios)
-            + ".\n/buscar · /salvas · /pausar · /status",
+            + ".\n/buscar · /salvas · /pausar · /status\n\n"
+            + acoes.COMO_AVALIAR,
         )
+
+    enviador = EnviadorTelegram(app.bot)
+
+    async def avaliar_e_responder(chat_id: int, texto: str) -> None:
+        perfil = await asyncio.to_thread(acoes.perfil_do_chat, engine, chat_id)
+        if perfil is None:
+            return
+        await enviador.enviar(chat_id, "🔎 Avaliando a vaga...")
+        try:
+            resposta, botoes = await asyncio.to_thread(
+                acoes.avaliar_no_chat, engine, settings, perfil.id, texto
+            )
+        except Exception:
+            log.exception("avaliação avulsa falhou")
+            resposta, botoes = "Deu erro ao avaliar essa vaga. Tente de novo mais tarde.", []
+        await enviador.enviar(chat_id, resposta, botoes)
+
+    agrupador = Agrupador(avaliar_e_responder)
+
+    @autorizado
+    async def avaliar(update: Update, context: Contexto, perfil: PerfilChat) -> None:
+        # O texto inteiro da mensagem, não `context.args`, para manter as quebras de linha.
+        mensagem = update.effective_message.text if update.effective_message else None
+        partes = (mensagem or "").split(maxsplit=1)
+        texto = partes[1] if len(partes) > 1 else ""
+        if not texto or update.effective_chat is None:
+            await responder(update, acoes.COMO_AVALIAR)
+            return
+        await avaliar_e_responder(update.effective_chat.id, texto)
+
+    @autorizado
+    async def texto_livre(update: Update, context: Contexto, perfil: PerfilChat) -> None:
+        if update.effective_chat and update.effective_message and update.effective_message.text:
+            agrupador.adicionar(update.effective_chat.id, update.effective_message.text)
 
     @autorizado
     async def buscar(update: Update, context: Contexto, perfil: PerfilChat) -> None:
@@ -145,6 +213,8 @@ def registrar_handlers(
     app.add_handler(CommandHandler("salvas", salvas))
     app.add_handler(CommandHandler("pausar", pausar))
     app.add_handler(CommandHandler("status", status))
+    app.add_handler(CommandHandler("avaliar", avaliar, block=False))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, texto_livre))
     app.add_handler(CallbackQueryHandler(feedback, pattern=r"^fb:"))
 
 

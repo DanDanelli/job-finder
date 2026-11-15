@@ -14,7 +14,7 @@ from typing import Protocol
 
 from sqlalchemy import Engine, select
 
-from job_finder.db.models import MatchDB, PerfilDB
+from job_finder.db.models import MatchDB, PerfilDB, VagaFonteDB
 from job_finder.db.session import sessao
 from job_finder.domain import StatusMatch
 
@@ -89,6 +89,16 @@ def _local(m: MatchDB) -> str:
     return " · ".join(partes) or "local não informado"
 
 
+def _nome_fonte(f: VagaFonteDB) -> str | None:
+    if f.fonte == "manual":
+        return None  # avaliação avulsa: a pessoa já sabe de onde veio
+    if f.fonte == "jsearch":
+        # O site de origem (LinkedIn, Indeed...) interessa mais que o agregador.
+        publisher = (f.dados_brutos or {}).get("publisher")
+        return f"{publisher} (Google for Jobs)" if publisher else "Google for Jobs"
+    return NOMES_FONTES.get(f.fonte, f.fonte)
+
+
 def _item(m: MatchDB) -> ItemDigest:
     return ItemDigest(
         match_id=m.id,
@@ -102,7 +112,7 @@ def _item(m: MatchDB) -> ItemDigest:
         dealbreakers=list(m.dealbreakers or []),
         resumo=m.resumo,
         url=m.vaga.url,
-        fontes=sorted({NOMES_FONTES.get(f.fonte, f.fonte) for f in m.vaga.fontes}),
+        fontes=sorted({n for f in m.vaga.fontes if (n := _nome_fonte(f))}),
     )
 
 

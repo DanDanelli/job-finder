@@ -352,6 +352,30 @@ def digest(
 
 
 @app.command()
+def avaliar(
+    entrada: Annotated[str, typer.Argument(help="Link da vaga ou o texto dela.")],
+    perfil: Annotated[str, typer.Option("--perfil", "-p", help="Nome do perfil.")],
+) -> None:
+    """Avalia uma vaga avulsa (o mesmo que mandar o link para o bot)."""
+    import re
+
+    from job_finder.telegram import acoes
+
+    settings = get_settings()
+    engine = _engine()
+    with db_session.sessao(engine, commit=False) as s:
+        db = repo.buscar_perfil(s, perfil)
+        if db is None:
+            raise typer.BadParameter(f"perfil '{perfil}' não encontrado")
+        perfil_id = db.id
+    texto, botoes = acoes.avaliar_no_chat(engine, settings, perfil_id, entrada)
+    console.print(re.sub(r"</?[a-z]+>", "", texto), markup=False, highlight=False)
+    for b in botoes:
+        if b.url:
+            console.print(b.url, markup=False)
+
+
+@app.command()
 def serve() -> None:
     """Sobe a aplicação web."""
     import uvicorn

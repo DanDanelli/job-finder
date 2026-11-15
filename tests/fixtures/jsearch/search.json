@@ -1,0 +1,53 @@
+{
+  "status": "OK",
+  "request_id": "sintetico-ate-gravar-a-resposta-real",
+  "parameters": {"query": "cloud architect", "country": "br", "page": 1, "num_pages": 1},
+  "data": [
+    {
+      "job_id": "abc123==",
+      "job_title": "Arquiteto de Soluções AWS Sênior",
+      "employer_name": "Acme Tecnologia",
+      "job_publisher": "LinkedIn",
+      "job_employment_type": "Full-time",
+      "job_apply_link": "https://br.linkedin.com/jobs/view/arquiteto-123",
+      "apply_options": [
+        {"publisher": "LinkedIn", "apply_link": "https://br.linkedin.com/jobs/view/arquiteto-123", "is_direct": false},
+        {"publisher": "Acme Careers", "apply_link": "https://acme.example/careers/42", "is_direct": true}
+      ],
+      "job_description": "Buscamos arquiteto AWS para landing zone multi-conta.",
+      "job_is_remote": false,
+      "job_posted_at_datetime_utc": "2026-11-14T10:00:00.000Z",
+      "job_location": "São Paulo, SP, Brasil",
+      "job_city": "São Paulo",
+      "job_state": "São Paulo",
+      "job_country": "BR",
+      "job_google_link": "https://www.google.com/search?q=jobs&htidocid=abc123",
+      "job_min_salary": 20000,
+      "job_max_salary": 28000,
+      "job_salary_currency": "BRL",
+      "job_salary_period": "MONTH"
+    },
+    {
+      "job_id": "def456==",
+      "job_title": "Cloud Architect (Remote)",
+      "employer_name": "Globex",
+      "job_publisher": "Indeed",
+      "job_employment_type": "Contractor",
+      "job_apply_link": "https://br.indeed.com/viewjob?jk=def456",
+      "apply_options": [],
+      "job_description": "Remote role for LATAM.",
+      "job_is_remote": true,
+      "job_posted_at_datetime_utc": null,
+      "job_location": null,
+      "job_city": null,
+      "job_state": null,
+      "job_country": "BR",
+      "job_google_link": null,
+      "job_min_salary": null,
+      "job_max_salary": null,
+      "job_salary_currency": null,
+      "job_salary_period": null
+    },
+    {"job_id": "sem-link", "job_title": "Vaga sem link", "job_apply_link": null, "job_google_link": null}
+  ]
+}
