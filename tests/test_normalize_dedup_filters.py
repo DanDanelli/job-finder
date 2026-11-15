@@ -197,3 +197,17 @@ def test_palavra_bloqueada_so_no_titulo_e_palavra_inteira() -> None:
     assert motivo_descarte(vaga(titulo="Estagio em Dados"), filtros, AGORA) == "palavra_bloqueada"
     assert motivo_descarte(vaga(titulo="International Sales"), filtros, AGORA) is None
     assert motivo_descarte(vaga(descricao="intern"), filtros, AGORA) is None
+
+
+@pytest.mark.parametrize(
+    ("texto", "esperado"),
+    [
+        ("Contagem - MG, BR", ["BR"]),  # MG seria Madagascar
+        ("Vitória, ES, Brasil", ["BR"]),  # ES seria Espanha
+        ("Madrid, ES", ["ES"]),  # sem o Brasil explícito, ES continua Espanha
+    ],
+)
+def test_sigla_de_estado_brasileiro_nao_vira_pais(texto: str, esperado: list[str]) -> None:
+    from job_finder.pipeline.locais import interpretar_local
+
+    assert interpretar_local(texto) == esperado

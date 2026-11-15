@@ -114,6 +114,13 @@ _ALIASES_PAIS = {
     "norge": "NO",
 }
 
+# Siglas de estados brasileiros. Várias coincidem com códigos de país (MG = Madagascar,
+# ES = Espanha, PA = Panamá, PE = Peru...): "Contagem - MG, Brasil" não é Madagascar.
+_UFS = {
+    "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA",
+    "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO",
+}  # fmt: skip
+
 # Palavras que acompanham o local mas não mudam o significado.
 _RUIDO = re.compile(r"\b(only|timezones?|time zones?|based|remote|remoto|apenas|somente)\b")
 _SEPARADORES = re.compile(r"[,;/|()]|\s+[-\u2013]\s+|\s+(?:or|and|ou|e)\s+|\s+&\s+")
@@ -138,6 +145,7 @@ def interpretar_local(texto: str | None) -> list[str]:
     if not texto:
         return []
     codigos: list[str] = []
+    siglas: set[str] = set()
     for pedaco in _SEPARADORES.split(texto):
         if not pedaco:
             continue
@@ -145,8 +153,13 @@ def interpretar_local(texto: str | None) -> list[str]:
         if not nome:
             continue
         codigo = _ALIASES_REGIAO.get(nome) or _pais(nome)
+        if codigo and len(nome) == 2:
+            siglas.add(codigo)
         if codigo and codigo not in codigos:
             codigos.append(codigo)
+    if "BR" in codigos:
+        # Com o Brasil explícito, sigla de UF é estado, não país.
+        codigos = [c for c in codigos if not (c in siglas and c in _UFS and c != "BR")]
     return codigos
 
 

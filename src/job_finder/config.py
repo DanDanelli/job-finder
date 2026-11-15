@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     digest_score_minimo: int = Field(default=60, ge=0, le=100)
     digest_max_vagas: int = Field(default=10, ge=1)
 
-    # JSearch (Google for Jobs via RapidAPI).
+    # JSearch (Google for Jobs), chave de app.openwebninja.com.
     # Ative com JOBFINDER_CONECTORES='["remotive","jsearch"]'.
     jsearch_api_key: SecretStr | None = None
     jsearch_paises: list[str] = ["br"]  # para queries sem país

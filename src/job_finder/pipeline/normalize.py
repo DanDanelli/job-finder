@@ -18,7 +18,9 @@ _CONTRATOS = {
         "full time", "fulltime", "permanent", "tempo integral", "efetivo", "clt", "cdi",
     },
     TipoContrato.MEIO_PERIODO: {"part time", "parttime", "meio periodo"},
-    TipoContrato.CONTRATO: {"contract", "contractor", "pj", "contrato"},
+    TipoContrato.CONTRATO: {
+        "contract", "contractor", "pj", "contrato", "prestador de servicos",
+    },
     TipoContrato.FREELANCE: {"freelance", "freelancer"},
     TipoContrato.ESTAGIO: {"internship", "intern", "estagio"},
     TipoContrato.TEMPORARIO: {"temporary", "temp", "temporario"},

@@ -1,7 +1,7 @@
 """Conector JSearch e quota mensal, sem rede."""
 
 import json
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -11,7 +11,7 @@ from sqlalchemy import Engine
 
 from job_finder.config import Settings
 from job_finder.connectors import base
-from job_finder.connectors.jsearch import URL, JSearch
+from job_finder.connectors.jsearch import URL, JSearch, _id_estavel
 from job_finder.domain import Query, Salario
 from job_finder.pipeline.normalize import normalizar
 from job_finder.quota import Quota, QuotaEsgotada
@@ -36,39 +36,87 @@ def quota(engine: Engine, hoje: date = HOJE) -> Quota:
     return Quota(engine, "jsearch", 6, hoje, limite_mensal=190)
 
 
-def test_converte_a_resposta(engine: Engine, api: respx.MockRouter) -> None:
+AGORA = datetime(2026, 11, 15, 12, tzinfo=UTC)
+
+
+def conector(http: httpx.Client, **kw: object) -> JSearch:
+    return JSearch(http, settings(**kw), relogio=lambda: AGORA)
+
+
+def test_converte_a_resposta_real(engine: Engine, api: respx.MockRouter) -> None:
     with base.cliente_http() as http:
-        vagas = JSearch(http, settings(jsearch_buscas_por_rodada=1)).buscar(QUERIES, quota(engine))
+        vagas = conector(http, jsearch_buscas_por_rodada=1).buscar(QUERIES, quota(engine))
 
-    assert [v.id_fonte for v in vagas] == ["abc123==", "def456=="]  # a sem link é ignorada
-    v = vagas[0]
-    assert (v.fonte, v.titulo, v.empresa) == (
-        "jsearch",
-        "Arquiteto de Soluções AWS Sênior",
-        "Acme Tecnologia",
-    )
-    assert str(v.url) == "https://br.linkedin.com/jobs/view/arquiteto-123"
-    assert str(v.url_candidatura) == "https://acme.example/careers/42"
-    assert v.publicada_em == datetime(2026, 11, 14, 10, tzinfo=UTC)
-    assert v.salario == Salario(minimo=20000, maximo=28000, moeda="BRL", periodo="mes")
-    assert v.dados_brutos["publisher"] == "LinkedIn"
-    normalizada = normalizar(v)
-    assert normalizada.pais == "BR" and normalizada.tipo_contrato == "tempo_integral"
+    linkedin, glassdoor, floripa = vagas
+    assert linkedin.fonte == "jsearch"
+    assert linkedin.id_fonte == "mlnvcI2qJnU3DPq2AAAAAA=="  # docid do Google, estável
+    assert linkedin.titulo == "InfoSec Architecture/Cloud Specialist"
+    assert linkedin.empresa == "RHI Magnesita"
+    assert str(linkedin.url).startswith("https://br.linkedin.com/jobs/view/")
+    assert linkedin.url_candidatura is None  # nenhuma opção direta
+    assert linkedin.publicada_em == AGORA - timedelta(days=19)  # "há 19 dias"
+    assert linkedin.dados_brutos["publisher"] == "LinkedIn"
+    n = normalizar(linkedin)
+    assert n.pais == "BR" and n.tipo_contrato == "tempo_integral"
 
-    remota = normalizar(vagas[1])
-    assert remota.modalidade == "remoto" and remota.tipo_contrato == "contrato"
+    assert glassdoor.modalidade == "remote" and normalizar(glassdoor).modalidade == "remoto"
+    assert floripa.publicada_em == AGORA - timedelta(hours=22)
+    assert normalizar(floripa).tipo_contrato == "contrato"  # "Prestador de serviços"
+    assert normalizar(floripa).pais == "BR"  # "Santa Catarina" + job_country
+
+
+def test_job_id_estavel_entre_buscas() -> None:
+    import base64
+
+    def job_id(token: str) -> str:
+        return (
+            base64.urlsafe_b64encode(f"abcDEF123-_AAAAAA==:{token}".encode()).decode().rstrip("=")
+        )
+
+    assert _id_estavel(job_id("busca1")) == _id_estavel(job_id("busca2")) == "abcDEF123-_AAAAAA=="
+    assert len(_id_estavel("nao-e-base64!!")) == 32
+
+
+@pytest.mark.parametrize(
+    ("texto", "idade"),
+    [
+        ("há 22 horas", timedelta(hours=22)),
+        ("há 1 dia", timedelta(days=1)),
+        ("há 2 semanas", timedelta(weeks=2)),
+        ("há 1 mês", timedelta(days=30)),
+        ("há 30+ dias", timedelta(days=30)),
+        ("3 days ago", timedelta(days=3)),
+    ],
+)
+def test_data_relativa(texto: str, idade: timedelta) -> None:
+    assert conector(httpx.Client())._publicada({"job_posted_at": texto}) == AGORA - idade
+    assert conector(httpx.Client())._publicada({"job_posted_at": None}) is None
+
+
+def test_salario_quando_vem() -> None:
+    job = {
+        "job_id": "x",
+        "job_title": "Arquiteto",
+        "job_apply_link": "https://x.example",
+        "job_min_salary": 20000,
+        "job_max_salary": 28000,
+        "job_salary_period": "MONTH",
+        "job_salary_string": "R$ 20 mil a R$ 28 mil por mês",
+    }
+    v = conector(httpx.Client())._converter(job)
+    assert v is not None
+    assert v.salario == Salario(minimo=20000, maximo=28000, moeda=None, periodo="mes")
+    assert conector(httpx.Client())._converter({"job_id": "y", "job_title": "Sem link"}) is None
 
 
 def test_envia_chave_pais_e_uma_pagina(engine: Engine, api: respx.MockRouter) -> None:
     with base.cliente_http() as http:
-        JSearch(http, settings(jsearch_buscas_por_rodada=1)).buscar(QUERIES, quota(engine))
+        conector(http, jsearch_buscas_por_rodada=1).buscar(QUERIES, quota(engine))
     req = api.calls.last.request
-    assert req.headers["x-rapidapi-key"] == "chave-teste"
-    assert req.headers["x-rapidapi-host"] == "jsearch.p.rapidapi.com"
+    assert req.headers["x-api-key"] == "chave-teste"
     assert dict(req.url.params) == {
         "query": "Cloud Architect",
         "country": "br",
-        "page": "1",
         "num_pages": "1",
         "date_posted": "3days",
     }

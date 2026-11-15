@@ -1,53 +1,143 @@
 {
   "status": "OK",
-  "request_id": "sintetico-ate-gravar-a-resposta-real",
-  "parameters": {"query": "cloud architect", "country": "br", "page": 1, "num_pages": 1},
-  "data": [
-    {
-      "job_id": "abc123==",
-      "job_title": "Arquiteto de Soluções AWS Sênior",
-      "employer_name": "Acme Tecnologia",
-      "job_publisher": "LinkedIn",
-      "job_employment_type": "Full-time",
-      "job_apply_link": "https://br.linkedin.com/jobs/view/arquiteto-123",
-      "apply_options": [
-        {"publisher": "LinkedIn", "apply_link": "https://br.linkedin.com/jobs/view/arquiteto-123", "is_direct": false},
-        {"publisher": "Acme Careers", "apply_link": "https://acme.example/careers/42", "is_direct": true}
-      ],
-      "job_description": "Buscamos arquiteto AWS para landing zone multi-conta.",
-      "job_is_remote": false,
-      "job_posted_at_datetime_utc": "2026-11-14T10:00:00.000Z",
-      "job_location": "São Paulo, SP, Brasil",
-      "job_city": "São Paulo",
-      "job_state": "São Paulo",
-      "job_country": "BR",
-      "job_google_link": "https://www.google.com/search?q=jobs&htidocid=abc123",
-      "job_min_salary": 20000,
-      "job_max_salary": 28000,
-      "job_salary_currency": "BRL",
-      "job_salary_period": "MONTH"
-    },
-    {
-      "job_id": "def456==",
-      "job_title": "Cloud Architect (Remote)",
-      "employer_name": "Globex",
-      "job_publisher": "Indeed",
-      "job_employment_type": "Contractor",
-      "job_apply_link": "https://br.indeed.com/viewjob?jk=def456",
-      "apply_options": [],
-      "job_description": "Remote role for LATAM.",
-      "job_is_remote": true,
-      "job_posted_at_datetime_utc": null,
-      "job_location": null,
-      "job_city": null,
-      "job_state": null,
-      "job_country": "BR",
-      "job_google_link": null,
-      "job_min_salary": null,
-      "job_max_salary": null,
-      "job_salary_currency": null,
-      "job_salary_period": null
-    },
-    {"job_id": "sem-link", "job_title": "Vaga sem link", "job_apply_link": null, "job_google_link": null}
-  ]
+  "request_id": "gravado-em-2026-11-15",
+  "parameters": {
+    "query": "Cloud Architect",
+    "num_pages": 1,
+    "date_posted": "week",
+    "country": "br",
+    "language": "pt"
+  },
+  "data": {
+    "jobs": [
+      {
+        "job_id": "bWxudmNJMnFKblUzRFBxMkFBQUFBQT09OkVzd0JDb3dCUVVSRVlsZGxZWGhuYkV4RVFUUk9PSEpsU0dWQ1owY3lXRFY0TkZsaWFuWlRPREZVYTIxU05GOU5URTVhWmpRMk5tMXpVMGhwZUV0eVYyVXliMTlzYlV0V2NFTkJVakoyVkdKV01ESjBiblpLVlZrMFVrWjRUa3czU0hCMWVtaEZUWG8zVTBkTmN6bG5WMHRhVWxOWmNqVlVXWGhpWlUxVFVVMDRSVVk0YzJoYVRGcDVZemRvWDFVd1Z6WVNGMlJwUkRaaGRESTBUR1JYYTNCMFVWQTRXV1p0ZDBGWkdpSkJTRTR3UlRkRlJuSXRXbnBaWkU5Q2JIWlRkMVZyWW5OTVZWWm1OblppUkZKMzpkMzA0ODI3ZA",
+        "job_title": "InfoSec Architecture/Cloud Specialist",
+        "employer_name": "RHI Magnesita",
+        "employer_logo": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSCEIgUDuFQXj_hXoFIcMYfvFTnMy-W2BlOYry0&s=0",
+        "employer_website": null,
+        "job_publisher": "LinkedIn",
+        "job_employment_type": "Tempo integral",
+        "job_employment_types": [
+          "FULLTIME"
+        ],
+        "job_apply_link": "https://br.linkedin.com/jobs/view/infosec-architecture-cloud-specialist-at-rhi-magnesita-4483681072",
+        "job_apply_is_direct": false,
+        "apply_options": [
+          {
+            "apply_link": "https://br.linkedin.com/jobs/view/infosec-architecture-cloud-specialist-at-rhi-magnesita-4483681072",
+            "is_direct": false,
+            "publisher": "LinkedIn"
+          }
+        ],
+        "job_description": "Hybrid\n\nInfoSec Architecture/Cloud Specialist\n\nAbout You\n\nRHI Magnesita is currently seeking an InfoSec Architecture/Cloud Specialist to bring strong technical expertise and hands-on experience to help us continuously improve our security posture across cloud platforms. This specialist-level role offers the opportunity to act as the subject matter expert for cloud security within RHI Magnesita’s I",
+        "job_is_remote": false,
+        "job_posted_at": "há 19 dias",
+        "job_posted_at_timestamp": null,
+        "job_posted_at_datetime_utc": null,
+        "job_location": "Contagem - Parque Industrial, Contagem - MG",
+        "job_city": "Contagem",
+        "job_state": "Minas Gerais",
+        "job_country": "BR",
+        "job_latitude": -19.9599187,
+        "job_longitude": -44.0370555,
+        "job_benefits": null,
+        "job_benefits_strings": null,
+        "job_google_link": "https://www.google.com/search?q=jobs&gl=br&hl=pt&udm=8#vhid=vt%3D20/docid%3DmlnvcI2qJnU3DPq2AAAAAA%3D%3D&vssid=jobs-detail-viewer",
+        "job_salary": null,
+        "job_salary_string": null,
+        "job_min_salary": null,
+        "job_max_salary": null,
+        "job_salary_period": null,
+        "job_onet_soc": null,
+        "job_onet_job_zone": null,
+        "job_uid": "mlnvcI2qJnU3DPq2AAAAAA=="
+      },
+      {
+        "job_id": "TkNIbEJ1aDRTRDRuQzhZMkFBQUFBQT09OkVzd0JDb3dCUVVSRVlsZGxZa2xMYzNsRFoxZE9UVzl4UTJkSU5reEZWbTFoZDJkb2JqTkhMVzl3YXpoU1dFSTBkVVEwWjA1WldVNVNVbFZOVEhGdFJuUlBNVVZTYmxvNVUxbE5jV2wwUmxRNE1HaDBNakV0YVZWWFpXWnJSbVphTWpobVJuUnRkWGxDY0RCaFNEWkxPVWhOTFZWcGJFNTFXbXhaYW1kWmFGcFJOVUZFYkZOclNuSk9Wa3B5ZVZKaFFYY1NGMlJwUkRaaGRESTBUR1JYYTNCMFVWQTRXV1p0ZDBGWkdpSkJTRTR3UlRkSGJVdEtablpITUhSVU5reFdOazlEWDJwS2R6SjVObXMyYUVWQjpkNTFlMWIzMw",
+        "job_title": "AWS Cloud Architect (LATAM)",
+        "employer_name": "SnapSoft Kft.",
+        "employer_logo": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSD6wpWrBIG_kphRR3q5HTzZl7Bi1X-NhtQt1di&s=0",
+        "employer_website": null,
+        "job_publisher": "Glassdoor",
+        "job_employment_type": "Tempo integral",
+        "job_employment_types": [
+          "FULLTIME"
+        ],
+        "job_apply_link": "https://www.glassdoor.com.br/job-listing/aws-cloud-architect-latam-snapsoft-JV_IC2479061_KO0,25_KE26,34.htm?jl=1010319186021",
+        "job_apply_is_direct": false,
+        "apply_options": [
+          {
+            "apply_link": "https://www.glassdoor.com.br/job-listing/aws-cloud-architect-latam-snapsoft-JV_IC2479061_KO0,25_KE26,34.htm?jl=1010319186021",
+            "is_direct": false,
+            "publisher": "Glassdoor"
+          }
+        ],
+        "job_description": "Remote from Latin America (Brazil or Argentina) · Full-time employment · Daily overlap with both Central European Time and North American client hours\n\nAre you a senior AWS Solutions Architect who has led large-scale cloud migrations end to end?\n\nIf so, join SnapSoft's Cloud Migration practice and own the technical side of complex migration and modernization programs for clients across North Ameri",
+        "job_is_remote": true,
+        "job_posted_at": "há 10 dias",
+        "job_posted_at_timestamp": null,
+        "job_posted_at_datetime_utc": null,
+        "job_location": "Qualquer lugar",
+        "job_city": null,
+        "job_state": null,
+        "job_country": null,
+        "job_latitude": null,
+        "job_longitude": null,
+        "job_benefits": null,
+        "job_benefits_strings": null,
+        "job_google_link": "https://www.google.com/search?q=jobs&gl=br&hl=pt&udm=8#vhid=vt%3D20/docid%3DNCHlBuh4SD4nC8Y2AAAAAA%3D%3D&vssid=jobs-detail-viewer",
+        "job_salary": null,
+        "job_salary_string": null,
+        "job_min_salary": null,
+        "job_max_salary": null,
+        "job_salary_period": null,
+        "job_onet_soc": null,
+        "job_onet_job_zone": null,
+        "job_uid": "NCHlBuh4SD4nC8Y2AAAAAA=="
+      },
+      {
+        "job_id": "Rl9rQmMydTE1ajBkNXMzdEFBQUFBQT09OkVzd0JDb3dCUVVSRVlsZGxZbE5CVTAxcFp6aHhOa1ptZG1aT1dIZFRVMWwwTFRWcVozTlRjMEppUTNWcmRqZHBjSGhRZWpCMlExWnFjMVp2UzIxR1RteDROVmxVVFhKSlYxQXpaMUUxVDJoWk1uVXRRVVJCUzFwb01IWkdZMU54YUdVelV6Rm9TSEZEWVVwb2FYaHVjR3BJYWpaTWFISlRYMHhLYWtSc0xXVjVOMlI2ZVVaVWN6ZzVTRU5PUjNNME0yNFNGMlJwUkRaaGRESTBUR1JYYTNCMFVWQTRXV1p0ZDBGWkdpSkJTRTR3UlRkSE1qZFJjM0pKT1UxWWFUWTNiWHBNVDNkTVdWOVhZbVJRVlVSbjoyZTM4OWQzNA",
+        "job_title": "Cloud Solutions Architect Sênior (Gcp)",
+        "employer_name": "confidential",
+        "employer_logo": "https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://vagasfloripa.com.br&size=128",
+        "employer_website": null,
+        "job_publisher": "Vagas Floripa",
+        "job_employment_type": "Prestador de serviços",
+        "job_employment_types": [],
+        "job_apply_link": "https://www.vagasfloripa.com.br/vagas/cloud-solutions-architect-senior-gcp/",
+        "job_apply_is_direct": false,
+        "apply_options": [
+          {
+            "apply_link": "https://www.vagasfloripa.com.br/vagas/cloud-solutions-architect-senior-gcp/",
+            "is_direct": false,
+            "publisher": "Vagas Floripa"
+          }
+        ],
+        "job_description": "Estamos com oportunidade para Cloud Solutions Architect Sênior (Gcp) na empresa BM VAGAS.\n\nBM VAGAS em parceria com empresa consolidada no seu segmento seleciona CLOUD SOLUTIONS ARCHITECT SÊNIOR (GCP) para Todo o Brasil.\n\nResponsabilidades\n\n• Desenhar soluções de ponta a ponta no GCP, do requisito ao desenho detalhado, com segurança, escalabilidade, resiliência e eficiência de custo\n\n• Definir e m",
+        "job_is_remote": false,
+        "job_posted_at": "há 22 horas",
+        "job_posted_at_timestamp": null,
+        "job_posted_at_datetime_utc": null,
+        "job_location": "Santa Catarina",
+        "job_city": null,
+        "job_state": "Santa Catarina",
+        "job_country": "BR",
+        "job_latitude": -26.928572,
+        "job_longitude": -49.365314899999994,
+        "job_benefits": null,
+        "job_benefits_strings": null,
+        "job_google_link": "https://www.google.com/search?q=jobs&gl=br&hl=pt&udm=8#vhid=vt%3D20/docid%3DF_kBc2u15j0d5s3tAAAAAA%3D%3D&vssid=jobs-detail-viewer",
+        "job_salary": null,
+        "job_salary_string": null,
+        "job_min_salary": null,
+        "job_max_salary": null,
+        "job_salary_period": null,
+        "job_onet_soc": null,
+        "job_onet_job_zone": null,
+        "job_uid": "F_kBc2u15j0d5s3tAAAAAA=="
+      }
+    ],
+    "cursor": "ErcECvcDQUREYldlYXJPaTZ3WmRKYXM5SjA1MHl1eTM2RUYxSkpxa0FCZ3Z6UnBnd29MTE5BMjJBOURfR0VhTWtna0dpUzNzWkI0M2NWTU9xN0JpeUY5V1ZibXBDWXJXVEV6cW91bUlMQnh1ejJTSS10endpenRpcjkyNmxNcmRHMmhYc3pYSUptQlRRU1RXRVNSbGVCbVBiTk5FYTJwajU1R0hmbGwzb1owYlNrVTBZQ3RpNFdVdl9YM0ZOWGFRcjRpX0hGV1ZxTGJYUTNUWUdQN0tZWU9LM0tQeFdpVHFabGVRX0FQamhGeVBfMmxlZnM1aWVIYzhhM3ZtalctYk12S3FKTVVYUTNTZVRRTk9RcUNGdzFWZW15S3A0enVka1QyRGpiT2tnSWxPSkVqNFc0M2JhWm1UalJ3SXVMVkpjY2Z3eEkxRmlQU29ncmQwdTJHWENoVFJQLXgzVnFwa28yTUZ0dzFHdk5Ubk5idERkX1B4dndZWXI5SFhZRUFTQ3VzamJ2NWxuakdfMXpsNG44M2xmWG9Eb2lfQTdubkxRWmstNzdYZmIzSzNydm15bFlCeUYwUXctZUhfY3VyZHVNUHpjOWdiYXg5U3oxZENqOXFUT1hCcS1hQTZKSTVrSzN4RUtnYnV6bDVXZlZIOWtab2Jsa0E4cVJ3X1ESF2RpRDZhdDI0TGRXa3B0UVA4WWZtd0FZGiJBSE4wRTdGaEpacFlsZVdpRFZ4ZV9SUmU2Q2NZTmJDYUZR"
+  }
 }
