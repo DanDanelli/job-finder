@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from job_finder.db.models import ProfileDB, SessionDB
 
-MIN_PASSWORD_LENGTH = 10
+MIN_PASSWORD_LENGTH = 8  # NIST SP 800-63B minimum for user-chosen passwords
 _N, _R, _P = 2**14, 8, 1
 _MAX_MEM = 64 * 1024 * 1024
 
