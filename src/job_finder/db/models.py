@@ -15,11 +15,32 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.types import TypeDecorator
 
 
 def agora() -> datetime:
     return datetime.now(UTC)
+
+
+class UTCDateTime(TypeDecorator[datetime]):
+    """Grava em UTC e devolve com tzinfo=UTC (o SQLite não guarda fuso horário)."""
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value: datetime | None, dialect: Dialect) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            raise ValueError("datetime sem fuso horário; use datetime.now(UTC)")
+        return value.astimezone(UTC).replace(tzinfo=None)
+
+    def process_result_value(self, value: datetime | None, dialect: Dialect) -> datetime | None:
+        if value is None:
+            return None
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
 class Base(DeclarativeBase):
@@ -27,10 +48,8 @@ class Base(DeclarativeBase):
 
 
 class Timestamps:
-    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
-    atualizado_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=agora, onupdate=agora
-    )
+    criado_em: Mapped[datetime] = mapped_column(UTCDateTime(), default=agora)
+    atualizado_em: Mapped[datetime] = mapped_column(UTCDateTime(), default=agora, onupdate=agora)
 
 
 class PerfilDB(Timestamps, Base):
@@ -58,13 +77,16 @@ class VagaDB(Timestamps, Base):
     empresa: Mapped[str | None] = mapped_column(String(256), index=True)
     pais: Mapped[str | None] = mapped_column(String(2), index=True)
     cidade: Mapped[str | None] = mapped_column(String(128))
+    local_texto: Mapped[str | None] = mapped_column(String(512))
+    locais_elegiveis: Mapped[list[Any]] = mapped_column(default=list, server_default="[]")
     modalidade: Mapped[str] = mapped_column(String(16))
+    tipo_contrato: Mapped[str | None] = mapped_column(String(16))
     descricao: Mapped[str | None] = mapped_column(Text)
     salario_min: Mapped[float | None] = mapped_column(Float)
     salario_max: Mapped[float | None] = mapped_column(Float)
     salario_moeda: Mapped[str | None] = mapped_column(String(3))
     salario_periodo: Mapped[str | None] = mapped_column(String(8))
-    publicada_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    publicada_em: Mapped[datetime | None] = mapped_column(UTCDateTime(), index=True)
     url: Mapped[str] = mapped_column(String(2048))
     url_candidatura: Mapped[str | None] = mapped_column(String(2048))
 
@@ -84,7 +106,7 @@ class VagaFonteDB(Base):
     id_fonte: Mapped[str] = mapped_column(String(256))
     url: Mapped[str] = mapped_column(String(2048))
     dados_brutos: Mapped[dict[str, Any]] = mapped_column(default=dict)
-    coletada_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
+    coletada_em: Mapped[datetime] = mapped_column(UTCDateTime(), default=agora)
 
     vaga: Mapped[VagaDB] = relationship(back_populates="fontes")
 
@@ -107,7 +129,7 @@ class MatchDB(Timestamps, Base):
     resumo: Mapped[str | None] = mapped_column(Text)
     modelo: Mapped[str | None] = mapped_column(String(64))
     tentativas: Mapped[int] = mapped_column(Integer, default=0)
-    notificado_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    notificado_em: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
     vaga: Mapped[VagaDB] = relationship(back_populates="matches")
     perfil: Mapped[PerfilDB] = relationship(back_populates="matches")
@@ -122,7 +144,7 @@ class FeedbackDB(Base):
     acao: Mapped[str] = mapped_column(String(16))  # salvar | descartar
     origem: Mapped[str] = mapped_column(String(16))  # telegram | web
     comentario: Mapped[str | None] = mapped_column(Text)
-    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
+    criado_em: Mapped[datetime] = mapped_column(UTCDateTime(), default=agora)
 
     match: Mapped[MatchDB] = relationship(back_populates="feedbacks")
 
@@ -136,8 +158,8 @@ class ExecucaoDB(Base):
     perfil_id: Mapped[int | None] = mapped_column(ForeignKey("perfis.id", ondelete="SET NULL"))
     tipo: Mapped[str] = mapped_column(String(16))  # agendada | sob_demanda | dry_run
     status: Mapped[str] = mapped_column(String(16))  # rodando | ok | parcial | erro
-    iniciada_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora)
-    finalizada_em: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    iniciada_em: Mapped[datetime] = mapped_column(UTCDateTime(), default=agora)
+    finalizada_em: Mapped[datetime | None] = mapped_column(UTCDateTime())
     vagas_coletadas: Mapped[int] = mapped_column(Integer, default=0)
     vagas_novas: Mapped[int] = mapped_column(Integer, default=0)
     matches_novos: Mapped[int] = mapped_column(Integer, default=0)
@@ -174,4 +196,4 @@ class CustoLLMDB(Base):
     cache_read_tokens: Mapped[int] = mapped_column(Integer, default=0)
     cache_write_tokens: Mapped[int] = mapped_column(Integer, default=0)
     custo_usd: Mapped[float] = mapped_column(Float, default=0.0)
-    criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=agora, index=True)
+    criado_em: Mapped[datetime] = mapped_column(UTCDateTime(), default=agora, index=True)

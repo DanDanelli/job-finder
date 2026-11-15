@@ -7,3 +7,6 @@ data/
 .mypy_cache/
 .ruff_cache/
 dist/
+# Perfis pessoais (só o exemplo vai para o repositório)
+perfis/*
+!perfis/exemplo.yaml

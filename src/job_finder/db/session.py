@@ -31,11 +31,23 @@ def criar_engine(url: str) -> Engine:
 
 
 @contextmanager
-def sessao(engine: Engine) -> Iterator[Session]:
-    """Sessão com commit ao final do bloco e rollback em caso de erro."""
+def sessao(engine: Engine, *, commit: bool = True) -> Iterator[Session]:
+    """Sessão transacional: commit ao final do bloco, rollback em caso de erro.
+
+    Com `commit=False` tudo é desfeito ao final (usado no dry-run).
+    """
     fabrica = sessionmaker(engine, expire_on_commit=False)
-    with fabrica() as s, s.begin():
-        yield s
+    with fabrica() as s:
+        s.begin()
+        try:
+            yield s
+        except BaseException:
+            s.rollback()
+            raise
+        if commit:
+            s.commit()
+        else:
+            s.rollback()
 
 
 def alembic_config(url: str) -> Config:

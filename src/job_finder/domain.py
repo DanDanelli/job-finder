@@ -14,15 +14,26 @@ class Modalidade(StrEnum):
     DESCONHECIDA = "desconhecida"
 
 
+class TipoContrato(StrEnum):
+    TEMPO_INTEGRAL = "tempo_integral"
+    MEIO_PERIODO = "meio_periodo"
+    CONTRATO = "contrato"  # contractor, PJ
+    FREELANCE = "freelance"
+    ESTAGIO = "estagio"
+    TEMPORARIO = "temporario"
+
+
 class StatusMatch(StrEnum):
-    NOVA = "nova"
+    PENDENTE = "pendente"  # passou nos filtros, aguardando scoring (ou scoring falhou)
+    NOVA = "nova"  # com nota, ainda sem ação do usuário
     SALVA = "salva"
     DESCARTADA = "descartada"
-    PENDENTE = "pendente"
 
 
 PeriodoSalario = Literal["ano", "mes", "hora"]
 CodigoPais = Annotated[str, Field(pattern=r"^[A-Z]{2}$")]  # ISO 3166-1 alfa-2
+# Código de país ISO alfa-2 ou de região (ver pipeline/locais.py), ex: "PT", "EUROPE".
+CodigoLocal = Annotated[str, Field(pattern=r"^[A-Z_]{2,}$")]
 
 
 class Salario(BaseModel):
@@ -39,13 +50,15 @@ class VagaBruta(BaseModel):
     id_fonte: str
     titulo: str
     empresa: str | None = None
-    local: str | None = None
-    descricao: str | None = None
+    local: str | None = None  # texto livre, ex: "LATAM, Europe" ou "Lisboa, Portugal"
+    descricao: str | None = None  # texto puro (o conector remove o HTML)
     url: HttpUrl
     url_candidatura: HttpUrl | None = None
     publicada_em: datetime | None = None
-    modalidade: str | None = None
-    salario: Salario | None = None
+    modalidade: str | None = None  # texto livre da fonte, ex: "remote", "hybrid"
+    tipo_contrato: str | None = None  # texto livre da fonte, ex: "full_time"
+    salario: Salario | None = None  # quando a fonte já entrega estruturado
+    salario_texto: str | None = None  # quando a fonte entrega texto, ex: "$35k - $52k"
     tags: list[str] = Field(default_factory=list)
     dados_brutos: dict[str, Any] = Field(default_factory=dict)
 
@@ -57,7 +70,11 @@ class Vaga(BaseModel):
     empresa: str | None = None
     pais: CodigoPais | None = None
     cidade: str | None = None
+    local_texto: str | None = None
+    # Países/regiões de onde se pode trabalhar (vagas remotas). Vazio = desconhecido.
+    locais_elegiveis: list[CodigoLocal] = Field(default_factory=list)
     modalidade: Modalidade = Modalidade.DESCONHECIDA
+    tipo_contrato: TipoContrato | None = None
     descricao: str | None = None
     salario: Salario | None = None
     publicada_em: datetime | None = None
@@ -84,11 +101,15 @@ class Query(BaseModel):
 class Filtros(BaseModel):
     """Filtros duros, aplicados em código antes de qualquer chamada ao LLM."""
 
+    # Países aceitos para vagas presenciais/híbridas. Vazio = qualquer.
     paises: list[CodigoPais] = Field(default_factory=list)
     cidades: list[str] = Field(default_factory=list)
+    # Países de onde a pessoa pode trabalhar remotamente (residência/autorização).
+    # Uma vaga remota passa se for elegível para algum deles. Vazio = não filtra.
+    remoto_a_partir_de: list[CodigoPais] = Field(default_factory=list)
     modalidades: list[Modalidade] = Field(default_factory=list)  # vazio = todas
-    idiomas: list[str] = Field(default_factory=list)
-    tipos_contrato: list[str] = Field(default_factory=list)
+    idiomas: list[str] = Field(default_factory=list)  # avaliado pelo LLM (M2), não em código
+    tipos_contrato: list[TipoContrato] = Field(default_factory=list)  # vazio = todos
     salario_minimo: Salario | None = None
     empresas_bloqueadas: list[str] = Field(default_factory=list)
     palavras_bloqueadas: list[str] = Field(default_factory=list)

@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     host: str = "0.0.0.0"
     port: int = 8000
+    # Conectores usados nas rodadas, ex: JOBFINDER_CONECTORES='["remotive"]'
+    conectores: list[str] = ["remotive"]
 
     @property
     def resolved_database_url(self) -> str:
