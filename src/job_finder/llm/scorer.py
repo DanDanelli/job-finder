@@ -11,15 +11,22 @@ from datetime import datetime, timedelta
 
 import anthropic
 import yaml
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, or_, select
+from sqlalchemy.orm import Session
 
 from job_finder.db import repo
-from job_finder.db.models import MatchDB, ProfileDB
+from job_finder.db.models import JobDB, MatchDB, ProfileDB
 from job_finder.db.session import session
 from job_finder.domain import ContractType, FitResult, Job, MatchStatus, Profile
 from job_finder.i18n import language_name
 from job_finder.llm.client import CostCapReached, InvalidResponse, LLMClient, is_fatal
-from job_finder.pipeline.prerank import prerank
+from job_finder.pipeline.prerank import (
+    RelevanceCutoff,
+    idf_table,
+    prerank,
+    relevance,
+    tokens,
+)
 
 log = logging.getLogger(__name__)
 
@@ -155,19 +162,31 @@ def evaluate(
 class ScoringSummary:
     profile: str
     pending: int = 0
+    skipped: int = 0  # below the relevance cutoff
     scored: int = 0
     failures: list[str] = field(default_factory=list)
     interrupted: str | None = None  # e.g. cost cap reached
 
 
+# Jobs collected in this window form the corpus that weighs terms for the cutoff.
+CORPUS_DAYS = 30
+
+
 def _select(
-    engine: Engine, profile_id: int, now: datetime, top_n: int
-) -> tuple[Profile, list[tuple[int, Job]], int]:
-    """Pre-ranks the pending matches, stores the BM25 score and returns the top N."""
+    engine: Engine,
+    profile_id: int,
+    now: datetime,
+    top_n: int,
+    cutoff: RelevanceCutoff | None = None,
+) -> tuple[Profile, list[tuple[int, Job]], int, int]:
+    """Pre-ranks the pending matches, stores the BM25 score and returns the top N.
+
+    With a cutoff, matches that are not relevant to the profile become SKIPPED and are
+    left out. Returns (profile, chosen, pending, skipped)."""
     with session(engine) as s:
         profile_db = s.get_one(ProfileDB, profile_id)
         profile = repo.profile_from(profile_db)
-        cutoff = now - timedelta(days=profile.filters.max_age_days)
+        max_age = now - timedelta(days=profile.filters.max_age_days)
         matches = [
             m
             for m in s.scalars(
@@ -177,17 +196,37 @@ def _select(
                     MatchDB.attempts < MAX_ATTEMPTS,
                 )
             )
-            if m.job.posted_at is None or m.job.posted_at >= cutoff
+            if m.job.posted_at is None or m.job.posted_at >= max_age
         ]
         jobs = [repo.job_from(m.job) for m in matches]
         for m, score in zip(matches, prerank(profile, jobs), strict=True):
             m.prerank_score = score
-        ranked = sorted(
-            zip(matches, jobs, strict=True),
-            key=lambda pair: pair[0].prerank_score or 0.0,
-            reverse=True,
+        candidates = list(zip(matches, jobs, strict=True))
+
+        skipped = 0
+        if cutoff is not None and candidates:
+            idf = idf_table(_corpus(s, now, {m.job_id for m in matches}))
+            kept = []
+            for pair, r in zip(candidates, relevance(profile, jobs, idf), strict=True):
+                if cutoff.passes(r):
+                    kept.append(pair)
+                else:
+                    pair[0].status = MatchStatus.SKIPPED
+                    skipped += 1
+            candidates = kept
+
+        ranked = sorted(candidates, key=lambda pair: pair[0].prerank_score or 0.0, reverse=True)
+        return profile, [(m.id, j) for m, j in ranked[:top_n]], len(matches), skipped
+
+
+def _corpus(s: Session, now: datetime, include: set[int]) -> list[list[str]]:
+    since = now - timedelta(days=CORPUS_DAYS)
+    rows = s.execute(
+        select(JobDB.title, JobDB.description).where(
+            or_(JobDB.created_at >= since, JobDB.id.in_(include))
         )
-        return profile, [(m.id, j) for m, j in ranked[:top_n]], len(matches)
+    )
+    return [tokens(title) + tokens(description) for title, description in rows]
 
 
 def score_pending(
@@ -200,6 +239,7 @@ def score_pending(
     top_n: int,
     now: datetime,
     run_id: int | None = None,
+    cutoff: RelevanceCutoff | None = None,
 ) -> ScoringSummary:
     """Scores the profile's best pending jobs with the LLM.
 
@@ -208,8 +248,8 @@ def score_pending(
     match stays pending and is retried in the next run, up to MAX_ATTEMPTS. Account
     errors (key, balance) or the cost cap stop everything.
     """
-    profile, chosen, pending = _select(engine, profile_id, now, top_n)
-    summary = ScoringSummary(profile=profile.name, pending=pending)
+    profile, chosen, pending, skipped = _select(engine, profile_id, now, top_n, cutoff)
+    summary = ScoringSummary(profile=profile.name, pending=pending, skipped=skipped)
 
     for match_id, job in chosen:
         try:

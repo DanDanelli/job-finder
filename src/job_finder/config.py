@@ -8,6 +8,8 @@ from typing import Literal
 from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from job_finder.pipeline.prerank import RelevanceCutoff
+
 Language = Literal["en", "pt-BR"]
 
 
@@ -40,6 +42,15 @@ class Settings(BaseSettings):
     monthly_cost_cap_usd: float = Field(default=5.0, ge=0)
     # How many pending jobs, per profile and run, go to the LLM after BM25.
     prerank_top_n: int = Field(default=30, ge=1)
+    # Relevance cutoff before the LLM (see pipeline/prerank.py): a job goes on if this
+    # share of the profile's terms is in its title, or the second share in its whole
+    # text. Set both to 0 to send everything.
+    relevance_min_title: float = Field(default=0.02, ge=0, le=1)
+    relevance_min_text: float = Field(default=0.14, ge=0, le=1)
+
+    @property
+    def relevance_cutoff(self) -> RelevanceCutoff:
+        return RelevanceCutoff(self.relevance_min_title, self.relevance_min_text)
 
     # Telegram: token from @BotFather. Without a token the bot does not start (runs go on).
     telegram_bot_token: SecretStr | None = None

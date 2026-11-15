@@ -28,6 +28,7 @@ class MatchStatus(StrEnum):
     NEW = "new"  # scored, no user action yet
     SAVED = "saved"
     DISMISSED = "dismissed"
+    SKIPPED = "skipped"  # below the relevance cutoff; never sent to the LLM
 
 
 SalaryPeriod = Literal["year", "month", "hour"]

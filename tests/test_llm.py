@@ -31,7 +31,15 @@ from job_finder.domain import (
 from job_finder.llm.client import CostCapReached, InvalidResponse, LLMClient, cost
 from job_finder.llm.profile_extractor import ProfileExtraction, extract_profile
 from job_finder.llm.scorer import INSTRUCTIONS, MAX_ATTEMPTS, score_pending
-from job_finder.pipeline.prerank import bm25, prerank
+from job_finder.pipeline.prerank import (
+    Relevance,
+    RelevanceCutoff,
+    bm25,
+    idf_table,
+    job_document,
+    prerank,
+    relevance,
+)
 from job_finder.pipeline.run import execute_run
 from job_finder.quota import Quota
 
@@ -186,6 +194,29 @@ def test_prerank_uses_title_skills_and_queries() -> None:
     assert s[1] > s[2] > s[0]
 
 
+def test_relevance_weighs_rare_terms_and_ignores_common_words() -> None:
+    profile = Profile(
+        name="d",
+        data=ProfileData(roles=["Cloud Architect"], skills=[Skill(name="AWS", weight=5)]),
+    )
+    jobs = [
+        Job(title="Cloud Architect", url="https://x/1", description="AWS landing zones"),
+        Job(title="Senior Nurse", url="https://x/2", description="senior care, remote"),
+        Job(title="Senior Brand Manager", url="https://x/3", description="senior, remote"),
+        Job(title="Senior Data Engineer", url="https://x/4", description="AWS pipelines"),
+    ]
+    idf = idf_table(job_document(j) for j in jobs)
+    r = relevance(profile, jobs, idf)
+    cutoff = RelevanceCutoff()
+    assert [cutoff.passes(x) for x in r] == [True, False, False, True]
+    assert r[0].title > r[3].title == 0.0 < r[3].text
+
+
+def test_profile_without_terms_makes_everything_relevant() -> None:
+    jobs = [Job(title="Anything", url="https://x/1")]
+    assert relevance(Profile(name="empty"), jobs, idf_table([])) == [Relevance(1.0, 1.0)]
+
+
 # --- scoring ------------------------------------------------------------------
 
 
@@ -245,6 +276,43 @@ JOBS = [
 
 def score(engine: Engine, c: LLMClient, profile_id: int, top_n: int = 10) -> Any:
     return score_pending(engine, c, profile_id, model=HAIKU, language="en", top_n=top_n, now=NOW)
+
+
+def test_jobs_below_the_relevance_cutoff_never_reach_the_llm(engine: Engine) -> None:
+    profile_id = prepare(engine, JOBS)
+    c = client(engine, lambda kw: Response(fit(70)))
+
+    r = score_pending(
+        engine,
+        c,
+        profile_id,
+        model=HAIKU,
+        language="en",
+        top_n=10,
+        now=NOW,
+        cutoff=RelevanceCutoff(),
+    )
+
+    assert (r.pending, r.skipped, r.scored) == (3, 1, 2)
+    m = matches(engine)
+    assert m["Brand Manager"].status == MatchStatus.SKIPPED
+    assert m["Brand Manager"].score is None
+    sent = [call["messages"][0]["content"] for call in c.anthropic.messages.calls]
+    assert not any("Brand Manager" in text for text in sent)
+    # Skipped jobs are not picked up again.
+    assert (
+        score_pending(
+            engine,
+            c,
+            profile_id,
+            model=HAIKU,
+            language="en",
+            top_n=10,
+            now=NOW,
+            cutoff=RelevanceCutoff(),
+        ).pending
+        == 0
+    )
 
 
 def matches(engine: Engine) -> dict[str, MatchDB]:

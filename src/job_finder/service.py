@@ -104,6 +104,7 @@ def full_run(
                 model=settings.scoring_model,
                 language=lang,
                 top_n=settings.prerank_top_n,
+                cutoff=settings.relevance_cutoff,
                 now=now,
                 run_id=run.run_id,
             )

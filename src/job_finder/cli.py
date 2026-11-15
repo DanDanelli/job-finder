@@ -227,7 +227,10 @@ def run(
             f" (discards: {discards})"
         )
         if pr.scoring:
-            console.print(f"  {pr.scoring.scored} jobs scored of {pr.scoring.pending} pending")
+            sc = pr.scoring
+            console.print(
+                f"  {sc.scored} jobs scored of {sc.pending} pending ({sc.skipped} off-profile)"
+            )
             _show_ranking(engine, pr.profile_id)
         elif dry_run:
             _show_approved(f.approved)
@@ -273,12 +276,13 @@ def _score(engine: Engine, names: list[str] | None, run_id: int | None = None) -
                 model=settings.scoring_model,
                 language=settings.language,
                 top_n=settings.prerank_top_n,
+                cutoff=settings.relevance_cutoff,
                 now=datetime.now(UTC),
                 run_id=run_id,
             )
         console.print(
             f"[bold]{name}[/]: {r.scored} jobs scored of {r.pending} pending"
-            + (f", {len(r.failures)} failures" if r.failures else "")
+            f" ({r.skipped} off-profile)" + (f", {len(r.failures)} failures" if r.failures else "")
         )
         for failure in r.failures:
             console.print(f"[red]⚠ {failure}[/]")

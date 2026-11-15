@@ -60,7 +60,10 @@ MESSAGES: dict[str, dict[str, str]] = {
         "status.paused": " · ⏸ paused",
         "status.runs": "Runs: {times} ({timezone})",
         "status.last_run": "Last run: {when}, {status}, {new} new jobs",
-        "status.jobs": "Jobs: {new} new, {saved} saved, {dismissed} dismissed, {pending} pending",
+        "status.jobs": (
+            "Jobs: {new} new, {saved} saved, {dismissed} dismissed, {pending} pending,"
+            " {skipped} off-profile"
+        ),
         "status.claude": "Claude this month: US$ {spent} of US$ {cap}",
         "status.quota": "Quota today: {quotas}",
         # run warnings
@@ -143,7 +146,8 @@ MESSAGES: dict[str, dict[str, str]] = {
         "status.runs": "Rodadas: {times} ({timezone})",
         "status.last_run": "Última rodada: {when}, {status}, {new} vagas novas",
         "status.jobs": (
-            "Vagas: {new} novas, {saved} salvas, {dismissed} descartadas, {pending} pendentes"
+            "Vagas: {new} novas, {saved} salvas, {dismissed} descartadas, {pending} pendentes,"
+            " {skipped} fora do perfil"
         ),
         "status.claude": "Claude no mês: US$ {spent} de US$ {cap}",
         "status.quota": "Quota hoje: {quotas}",

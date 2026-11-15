@@ -134,6 +134,7 @@ def status_text(
             saved=counts.get(MatchStatus.SAVED, 0),
             dismissed=counts.get(MatchStatus.DISMISSED, 0),
             pending=counts.get(MatchStatus.PENDING, 0),
+            skipped=counts.get(MatchStatus.SKIPPED, 0),
         )
     )
     lines.append(
