@@ -103,6 +103,11 @@ class Settings(BaseSettings):
     ]
     weworkremotely_daily_limit: int | None = 33  # three full runs
 
+    # Site. The cookie is Secure by default (tailscale serve gives HTTPS); turn it off
+    # only for plain-HTTP access on a trusted network.
+    web_secure_cookie: bool = True
+    web_session_days: int = Field(default=30, ge=1)
+
     @property
     def resolved_database_url(self) -> str:
         """Database URL; by default a SQLite file inside `data_dir`."""

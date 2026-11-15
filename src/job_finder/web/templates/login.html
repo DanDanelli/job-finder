@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}{{ t("web.login.title") }} · Job Finder{% endblock %}
+{% block main %}
+<form method="post" action="/login" class="card login">
+  <h1>Job Finder</h1>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <label>{{ t("web.login.username") }}
+    <input name="username" value="{{ username }}" autocomplete="username" autocapitalize="none" required autofocus>
+  </label>
+  <label>{{ t("web.login.password") }}
+    <input name="password" type="password" autocomplete="current-password" required>
+  </label>
+  <button type="submit">{{ t("web.login.submit") }}</button>
+</form>
+{% endblock %}

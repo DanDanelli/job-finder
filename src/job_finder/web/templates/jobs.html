@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}{{ t("web.nav.jobs") }} · Job Finder{% endblock %}
+{% block main %}
+<nav class="tabs">
+  {% for name in tabs %}
+  <a href="/jobs?tab={{ name }}" {% if name == tab %}aria-current="page"{% endif %}>
+    {{ t("web.tab." ~ name) }} <span class="count">{{ counts[name] }}</span>
+  </a>
+  {% endfor %}
+</nav>
+
+<form method="get" action="/jobs" class="filters">
+  <input type="hidden" name="tab" value="{{ tab }}">
+  <label>{{ t("web.jobs.min_score") }}
+    <select name="min_score">
+      {% for s in score_steps %}<option value="{{ s }}" {% if s == min_score %}selected{% endif %}>{{ s }}+</option>{% endfor %}
+    </select>
+  </label>
+  <label>{{ t("web.jobs.work_mode") }}
+    <select name="mode">
+      <option value="">{{ t("web.jobs.any") }}</option>
+      {% for m in WORK_MODES %}<option value="{{ m }}" {% if m == mode %}selected{% endif %}>{{ work_mode(m) }}</option>{% endfor %}
+    </select>
+  </label>
+  <button type="submit" class="secondary">{{ t("web.jobs.filter") }}</button>
+</form>
+
+{% if tab == "new" and counts.pending %}<p class="muted">{{ t("web.jobs.pending", n=counts.pending) }}</p>{% endif %}
+
+{% for card in cards %}{% set j = card.item %}
+<article class="card job" id="m{{ j.match_id }}">
+  <div class="job-head">
+    <span class="score {% if j.score >= 70 %}high{% elif j.score >= 50 %}mid{% else %}low{% endif %}">{{ j.score }}</span>
+    <div>
+      <h2><a href="{{ j.url }}" target="_blank" rel="noopener noreferrer">{{ j.title }}</a></h2>
+      <p class="meta">
+        {% for part in [j.company, work_mode(j.work_mode), short_places(j.location_text), salary(j)] if part %}{{ part }}{% if not loop.last %} · {% endif %}{% endfor %}
+      </p>
+    </div>
+  </div>
+  {% if j.summary %}<p class="summary">{{ j.summary }}</p>{% endif %}
+  <ul class="points">
+    {% for s in j.strengths %}<li class="good">{{ s }}</li>{% endfor %}
+    {% for g in j.gaps %}<li class="gap">{{ g }}</li>{% endfor %}
+    {% for d in j.dealbreakers %}<li class="bad">{{ d }}</li>{% endfor %}
+  </ul>
+  <div class="job-foot">
+    <p class="muted">
+      {% if card.posted_at %}{{ t("web.jobs.posted", date=card.posted_at.strftime("%d/%m/%Y")) }}{% endif %}
+      {% if j.sources %} · via {% for n in j.sources %}{% if j.source_links.get(n) %}<a href="{{ j.source_links[n] }}" target="_blank" rel="noopener noreferrer">{{ n }}</a>{% else %}{{ n }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+    </p>
+    <form method="post" action="/matches/{{ j.match_id }}" class="actions">
+      <input type="hidden" name="back" value="{{ query }}">
+      {% if tab != "saved" %}<button name="action" value="save">{{ t("web.action.save") }}</button>{% endif %}
+      {% if tab != "dismissed" %}<button name="action" value="dismiss" class="secondary">{{ t("web.action.dismiss") }}</button>{% endif %}
+      {% if tab != "new" %}<button name="action" value="restore" class="secondary">{{ t("web.action.restore") }}</button>{% endif %}
+      <a class="button secondary" href="{{ j.url }}" target="_blank" rel="noopener noreferrer">{{ t("web.action.open") }}</a>
+    </form>
+  </div>
+</article>
+{% else %}
+<p class="muted empty">{{ t("web.jobs.empty") }}</p>
+{% endfor %}
+{% endblock %}

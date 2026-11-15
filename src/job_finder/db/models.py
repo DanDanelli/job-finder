@@ -67,6 +67,8 @@ class ProfileDB(Timestamps, Base):
     resume_path: Mapped[str | None] = mapped_column(String(512))
     # Paused: left out of scheduled runs and gets no digest.
     paused: Mapped[bool] = mapped_column(default=False, server_default=sa_false())
+    # Site login (scrypt, see web/auth.py). None = cannot sign in to the site.
+    password_hash: Mapped[str | None] = mapped_column(String(256))
 
     matches: Mapped[list["MatchDB"]] = relationship(back_populates="profile")
 
@@ -202,3 +204,17 @@ class LLMCostDB(Base):
     cache_write_tokens: Mapped[int] = mapped_column(Integer, default=0)
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, index=True)
+
+
+class SessionDB(Base):
+    """A site login. The cookie carries the token; only its SHA-256 is stored."""
+
+    __tablename__ = "sessions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    profile_id: Mapped[int] = mapped_column(
+        ForeignKey("profiles.id", ondelete="CASCADE"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime())

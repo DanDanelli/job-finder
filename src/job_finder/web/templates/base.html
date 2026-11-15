@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>{% block title %}Job Finder{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  {% if profile is defined %}
+  <header class="top">
+    <a class="brand" href="/jobs">Job Finder</a>
+    <nav>
+      <a href="/jobs" {% if nav == "jobs" %}aria-current="page"{% endif %}>{{ t("web.nav.jobs") }}</a>
+      <a href="/profile" {% if nav == "profile" %}aria-current="page"{% endif %}>{{ t("web.nav.profile") }}</a>
+    </nav>
+    <form method="post" action="/logout" class="who">
+      <span>{{ profile.name }}</span>
+      <button type="submit" class="link">{{ t("web.logout") }}</button>
+    </form>
+  </header>
+  {% endif %}
+  <main>{% block main %}{% endblock %}</main>
+</body>
+</html>

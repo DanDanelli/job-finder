@@ -46,6 +46,29 @@ docker compose up -d --build
 
 The database lives in the `./data` volume. Migrations run on startup.
 
+## Site
+
+Each profile signs in with its own name and password and sees only its own
+jobs and profile: the New / Saved / Dismissed tabs, and the searches, filters
+and preferences. There is no sign-up; set or change a password from the
+terminal (it is asked twice and never echoed, and it signs out open sessions):
+
+```bash
+docker compose exec job-finder job-finder profile password <name>
+```
+
+The container listens only on `127.0.0.1:8000`. Reach it over Tailscale, which
+also gives HTTPS (the session cookie is `Secure` by default):
+
+```bash
+sudo tailscale serve --bg --https=8443 http://127.0.0.1:8000
+# https://<machine>.<tailnet>.ts.net:8443
+```
+
+For plain HTTP on a trusted network, set `JOBFINDER_WEB_SECURE_COOKIE=false`.
+Tightening a filter removes the matches it now rejects that nobody has seen yet
+(not sent in a digest, no feedback); loosening one takes effect at the next run.
+
 ## Sources and their terms
 
 Each connector follows its source's terms, recorded in its docstring:

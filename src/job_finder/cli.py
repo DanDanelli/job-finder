@@ -177,6 +177,27 @@ def profile_export(name: Annotated[str, typer.Argument(help="Profile name.")]) -
         typer.echo(write_profile_yaml(repo.profile_from(db)), nl=False)
 
 
+@profile_app.command("password")
+def profile_password(
+    name: Annotated[str, typer.Argument(help="Profile name (also the site username).")],
+) -> None:
+    """Sets the profile's site password (asked twice, never echoed). Signs out its
+    open sessions."""
+    from job_finder.web import auth
+
+    engine = _engine()
+    profile_id = _profile_id(engine, name)
+    password = typer.prompt("New password", hide_input=True, confirmation_prompt=True)
+    try:
+        hashed = auth.hash_password(password)
+    except ValueError as e:
+        raise typer.BadParameter(str(e)) from None
+    with db_session.session(engine) as s:
+        s.get_one(ProfileDB, profile_id).password_hash = hashed
+        auth.end_all_sessions(s, profile_id)
+    typer.echo(f"Password set for '{name}'. The site username is '{name}'.")
+
+
 @profile_app.command("list")
 def profile_list() -> None:
     """Lists the profiles."""

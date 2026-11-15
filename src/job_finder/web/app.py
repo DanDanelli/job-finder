@@ -72,6 +72,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="Job Finder", version=__version__, lifespan=lifespan)
 
+    from job_finder.web.site import mount_site
+
+    mount_site(app, engine, settings)
+
     @app.get("/health")
     def health() -> dict[str, str]:
         with engine.connect() as conn:

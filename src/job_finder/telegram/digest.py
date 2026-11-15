@@ -174,11 +174,11 @@ def format_header(d: Digest, lang: str) -> str:
 
 def _location(item: DigestItem, lang: str) -> str:
     mode = t(lang, f"work_mode.{item.work_mode}") if item.work_mode in WORK_MODES else None
-    parts = [p for p in (mode, _short_places(item.location_text)) if p]
+    parts = [p for p in (mode, short_places(item.location_text)) if p]
     return " · ".join(parts) or t(lang, "location.unknown")
 
 
-def _short_places(text: str | None, keep: int = 3) -> str | None:
+def short_places(text: str | None, keep: int = 3) -> str | None:
     """ "Anguilla, Antigua and Barbuda, Argentina, ..." (some sources list 50 countries)
     becomes "Anguilla, Antigua and Barbuda, Argentina +47". Brazil, when listed, stays
     in view."""

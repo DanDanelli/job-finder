@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}{{ t("web.profile.title") }} · Job Finder{% endblock %}
+{% macro error(name) %}{% if errors.get(name) %}<span class="error">{{ t("web.profile.not_recognized", value=errors[name]) }}</span>{% endif %}{% endmacro %}
+{% macro salary_row(prefix, label) %}
+<div class="salary {% if errors.get(prefix ~ '_amount') or errors.get(prefix ~ '_currency') %}invalid{% endif %}">
+  <span>{{ label }}</span>
+  <input name="{{ prefix }}_amount" value="{{ v.get(prefix ~ '_amount', '') }}" inputmode="decimal" aria-label="{{ label }}">
+  <input name="{{ prefix }}_currency" value="{{ v.get(prefix ~ '_currency', 'BRL') }}" maxlength="3" class="currency" aria-label="currency">
+  <select name="{{ prefix }}_period" aria-label="period">
+    {% for p in PERIODS %}<option value="{{ p }}" {% if v.get(prefix ~ '_period', 'month') == p %}selected{% endif %}>/{{ t("period." ~ p) }}</option>{% endfor %}
+  </select>
+  {{ error(prefix ~ "_amount") }}{{ error(prefix ~ "_currency") }}
+</div>
+{% endmacro %}
+{% block main %}
+<h1>{{ t("web.profile.title") }}: {{ profile.name }}</h1>
+{% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}
+{% if errors %}<p class="error" role="alert">{{ t("web.profile.errors") }}</p>{% endif %}
+
+<form method="post" action="/profile" class="card profile">
+  <fieldset>
+    <legend>{{ t("web.profile.searches") }}</legend>
+    <textarea name="queries" rows="6" class="{% if errors.get('queries') %}invalid{% endif %}">{{ v.get("queries", "") }}</textarea>
+    <small>{{ t("web.profile.queries.hint") }}</small>{{ error("queries") }}
+  </fieldset>
+
+  <fieldset>
+    <legend>{{ t("web.profile.filters") }}</legend>
+    <small>{{ t("web.profile.filters.hint") }}</small>
+
+    {% set modes = v.get("work_modes", "").split(",") %}
+    <div class="group"><span class="label">{{ t("web.profile.work_modes") }}</span>
+      {% for m in WORK_MODES %}<label class="check"><input type="checkbox" name="work_modes" value="{{ m }}" {% if m in modes %}checked{% endif %}> {{ work_mode(m) }}</label>{% endfor %}
+      <small>{{ t("web.profile.none_is_all") }}</small>
+    </div>
+
+    <label>{{ t("web.profile.remote_from") }}
+      <input name="remote_from" value="{{ v.get('remote_from', '') }}" class="{% if errors.get('remote_from') %}invalid{% endif %}">
+      <small>{{ t("web.profile.remote_from.hint") }}</small>{{ error("remote_from") }}
+    </label>
+
+    <label>{{ t("web.profile.countries") }}
+      <input name="countries" value="{{ v.get('countries', '') }}" class="{% if errors.get('countries') %}invalid{% endif %}">
+      <small>{{ t("web.profile.countries.hint") }}</small>{{ error("countries") }}
+    </label>
+
+    <label>{{ t("web.profile.cities") }}
+      <textarea name="cities" rows="3">{{ v.get("cities", "") }}</textarea>
+      <small>{{ t("web.profile.lines.hint") }}</small>
+    </label>
+
+    {% set contracts = v.get("contract_types", "").split(",") %}
+    <div class="group"><span class="label">{{ t("web.profile.contract_types") }}</span>
+      {% for c in CONTRACT_TYPES %}<label class="check"><input type="checkbox" name="contract_types" value="{{ c }}" {% if c in contracts %}checked{% endif %}> {{ t("contract." ~ c) }}</label>{% endfor %}
+      <small>{{ t("web.profile.none_is_all") }}</small>
+    </div>
+
+    <div class="group"><span class="label">{{ t("web.profile.salary") }}</span>
+      {{ salary_row("min_any", t("web.profile.min_any")) }}
+      {% for c in SALARY_CONTRACTS %}{{ salary_row("min_" ~ c, t("web.profile.min_" ~ c)) }}{% endfor %}
+      <small>{{ t("web.profile.salary.hint") }}</small>
+    </div>
+
+    <label>{{ t("web.profile.blocked_companies") }}
+      <textarea name="blocked_companies" rows="3">{{ v.get("blocked_companies", "") }}</textarea>
+      <small>{{ t("web.profile.block.hint") }}</small>
+    </label>
+    <label>{{ t("web.profile.blocked_keywords") }}
+      <textarea name="blocked_keywords" rows="3">{{ v.get("blocked_keywords", "") }}</textarea>
+      <small>{{ t("web.profile.block.hint") }}</small>
+    </label>
+
+    <label>{{ t("web.profile.max_age_days") }}
+      <input name="max_age_days" type="number" min="1" value="{{ v.get('max_age_days', '14') }}" class="short {% if errors.get('max_age_days') %}invalid{% endif %}">
+      {{ error("max_age_days") }}
+    </label>
+  </fieldset>
+
+  <fieldset>
+    <legend>{{ t("web.profile.preferences") }}</legend>
+    <textarea name="preferences" rows="6">{{ v.get("preferences", "") }}</textarea>
+    <small>{{ t("web.profile.preferences.hint") }}</small>
+  </fieldset>
+
+  <label class="check"><input type="checkbox" name="paused" {% if v.get("paused") == "on" %}checked{% endif %}> {{ t("web.profile.paused") }}</label>
+
+  <button type="submit">{{ t("web.profile.save") }}</button>
+</form>
+{% endblock %}
