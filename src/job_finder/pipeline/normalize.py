@@ -1,73 +1,73 @@
-"""VagaBruta (formato de cada fonte) → Vaga (formato único)."""
+"""RawJob (each source's format) -> Job (a single format)."""
 
 from datetime import UTC
 
-from job_finder.domain import Modalidade, TipoContrato, Vaga, VagaBruta
-from job_finder.pipeline.locais import WORLDWIDE, interpretar_local
-from job_finder.pipeline.salario import interpretar_salario
-from job_finder.texto import chave
+from job_finder.domain import ContractType, Job, RawJob, WorkMode
+from job_finder.pipeline.locations import WORLDWIDE, parse_location
+from job_finder.pipeline.salary import parse_salary
+from job_finder.text import key
 
-_MODALIDADES = {
-    Modalidade.REMOTO: {"remote", "remoto", "anywhere", "work from home", "home office", "wfh"},
-    Modalidade.HIBRIDO: {"hybrid", "hibrido", "flexible"},
-    Modalidade.PRESENCIAL: {"onsite", "on site", "presencial", "in office", "office"},
+# Terms in English and Portuguese: the sources and the users are in both.
+_WORK_MODES = {
+    WorkMode.REMOTE: {"remote", "remoto", "anywhere", "work from home", "home office", "wfh"},
+    WorkMode.HYBRID: {"hybrid", "hibrido", "flexible"},
+    WorkMode.ONSITE: {"onsite", "on site", "presencial", "in office", "office"},
 }
 
-_CONTRATOS = {
-    TipoContrato.TEMPO_INTEGRAL: {
+_CONTRACTS = {
+    ContractType.FULL_TIME: {
         "full time", "fulltime", "permanent", "tempo integral", "efetivo", "clt", "cdi",
     },
-    TipoContrato.MEIO_PERIODO: {"part time", "parttime", "meio periodo"},
-    TipoContrato.CONTRATO: {
+    ContractType.PART_TIME: {"part time", "parttime", "meio periodo"},
+    ContractType.CONTRACT: {
         "contract", "contractor", "pj", "contrato", "prestador de servicos",
     },
-    TipoContrato.FREELANCE: {"freelance", "freelancer"},
-    TipoContrato.ESTAGIO: {"internship", "intern", "estagio"},
-    TipoContrato.TEMPORARIO: {"temporary", "temp", "temporario"},
+    ContractType.FREELANCE: {"freelance", "freelancer"},
+    ContractType.INTERNSHIP: {"internship", "intern", "estagio"},
+    ContractType.TEMPORARY: {"temporary", "temp", "temporario"},
 }  # fmt: skip
 
 
-def _modalidade(texto: str | None) -> Modalidade:
-    if not texto:
-        return Modalidade.DESCONHECIDA
-    k = chave(texto)
-    for modalidade, termos in _MODALIDADES.items():
-        if k in termos:
-            return modalidade
-    return Modalidade.DESCONHECIDA
+def _work_mode(text: str | None) -> WorkMode:
+    if not text:
+        return WorkMode.UNKNOWN
+    k = key(text)
+    for mode, terms in _WORK_MODES.items():
+        if k in terms:
+            return mode
+    return WorkMode.UNKNOWN
 
 
-def _tipo_contrato(texto: str | None) -> TipoContrato | None:
-    if not texto:
+def _contract_type(text: str | None) -> ContractType | None:
+    if not text:
         return None
-    k = chave(texto)
-    for tipo, termos in _CONTRATOS.items():
-        if k in termos:
-            return tipo
+    k = key(text)
+    for kind, terms in _CONTRACTS.items():
+        if k in terms:
+            return kind
     return None
 
 
-def normalizar(bruta: VagaBruta) -> Vaga:
-    modalidade = _modalidade(bruta.modalidade)
-    locais = interpretar_local(bruta.local)
-    paises = [c for c in locais if len(c) == 2]
+def normalize(raw: RawJob) -> Job:
+    locations = parse_location(raw.location)
+    countries = [c for c in locations if len(c) == 2]
 
-    publicada = bruta.publicada_em
-    if publicada is not None and publicada.tzinfo is None:
-        publicada = publicada.replace(tzinfo=UTC)
+    posted = raw.posted_at
+    if posted is not None and posted.tzinfo is None:
+        posted = posted.replace(tzinfo=UTC)
 
-    return Vaga(
-        titulo=" ".join(bruta.titulo.split()),
-        empresa=" ".join(bruta.empresa.split()) if bruta.empresa else None,
-        # País da vaga só quando o local aponta para um único país.
-        pais=paises[0] if len(paises) == 1 and len(locais) == 1 else None,
-        local_texto=bruta.local,
-        locais_elegiveis=[WORLDWIDE] if WORLDWIDE in locais else locais,
-        modalidade=modalidade,
-        tipo_contrato=_tipo_contrato(bruta.tipo_contrato),
-        descricao=bruta.descricao,
-        salario=bruta.salario or interpretar_salario(bruta.salario_texto),
-        publicada_em=publicada,
-        url=bruta.url,
-        url_candidatura=bruta.url_candidatura,
+    return Job(
+        title=" ".join(raw.title.split()),
+        company=" ".join(raw.company.split()) if raw.company else None,
+        # The job's country only when the location points to a single country.
+        country=countries[0] if len(countries) == 1 and len(locations) == 1 else None,
+        location_text=raw.location,
+        eligible_locations=[WORLDWIDE] if WORLDWIDE in locations else locations,
+        work_mode=_work_mode(raw.work_mode),
+        contract_type=_contract_type(raw.contract_type),
+        description=raw.description,
+        salary=raw.salary or parse_salary(raw.salary_text),
+        posted_at=posted,
+        url=raw.url,
+        apply_url=raw.apply_url,
     )

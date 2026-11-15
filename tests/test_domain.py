@@ -1,38 +1,38 @@
 import pytest
 from pydantic import ValidationError
 
-from job_finder.domain import Filtros, Perfil, Query, ResultadoFit, Skill
+from job_finder.domain import Filters, FitResult, Profile, Query, Skill
 
 
-def test_resultado_fit_limita_score() -> None:
-    assert ResultadoFit(score=85, resumo="ok").score == 85
-    for invalido in (-1, 101):
+def test_fit_result_bounds_the_score() -> None:
+    assert FitResult(score=85, summary="ok").score == 85
+    for invalid in (-1, 101):
         with pytest.raises(ValidationError):
-            ResultadoFit(score=invalido, resumo="x")
+            FitResult(score=invalid, summary="x")
 
 
-def test_skill_peso_entre_1_e_5() -> None:
+def test_skill_weight_between_1_and_5() -> None:
     with pytest.raises(ValidationError):
-        Skill(nome="AWS", peso=6)
+        Skill(name="AWS", weight=6)
 
 
-def test_codigo_de_pais_iso2_maiusculo() -> None:
-    assert Query(termo="Cloud Architect", paises=["DE", "PT"]).paises == ["DE", "PT"]
+def test_country_code_is_uppercase_iso2() -> None:
+    assert Query(term="Cloud Architect", countries=["BR", "PT"]).countries == ["BR", "PT"]
     with pytest.raises(ValidationError):
-        Query(termo="x", paises=["deu"])
+        Query(term="x", countries=["bra"])
 
 
-def test_perfil_tem_defaults_utilizaveis() -> None:
-    perfil = Perfil(nome="daniel")
-    assert perfil.filtros == Filtros()
-    assert perfil.filtros.idade_maxima_dias == 14
-    assert perfil.queries == []
+def test_profile_has_usable_defaults() -> None:
+    profile = Profile(name="daniel")
+    assert profile.filters == Filters()
+    assert profile.filters.max_age_days == 14
+    assert profile.queries == []
 
 
-def test_perfil_ida_e_volta_em_json() -> None:
-    perfil = Perfil(
-        nome="daniel",
+def test_profile_round_trips_through_json() -> None:
+    profile = Profile(
+        name="daniel",
         telegram_chat_id=8_000_000_000,
-        queries=[Query(termo="DevOps Lead", paises=["DE"])],
+        queries=[Query(term="DevOps Lead", countries=["BR"])],
     )
-    assert Perfil.model_validate_json(perfil.model_dump_json()) == perfil
+    assert Profile.model_validate_json(profile.model_dump_json()) == profile

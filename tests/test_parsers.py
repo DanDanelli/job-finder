@@ -1,15 +1,15 @@
-"""Parsers de texto livre: local, salário, HTML. Casos tirados de vagas reais."""
+"""Free-text parsers: location, salary, HTML. Cases taken from real postings."""
 
 import pytest
 
-from job_finder.domain import Salario
-from job_finder.pipeline.locais import WORLDWIDE, elegivel, interpretar_local
-from job_finder.pipeline.salario import anual, interpretar_salario
-from job_finder.texto import chave, html_para_texto
+from job_finder.domain import Salary
+from job_finder.pipeline.locations import WORLDWIDE, is_eligible, parse_location
+from job_finder.pipeline.salary import parse_salary, yearly
+from job_finder.text import html_to_text, key
 
 
 @pytest.mark.parametrize(
-    ("texto", "esperado"),
+    ("text", "expected"),
     [
         ("Worldwide", [WORLDWIDE]),
         ("USA", ["US"]),
@@ -23,75 +23,88 @@ from job_finder.texto import chave, html_para_texto
         ("Germany or Netherlands", ["DE", "NL"]),
         ("Brasil", ["BR"]),
         ("UK only", ["GB"]),
-        ("Lisboa, Portugal", ["PT"]),  # cidade ignorada
-        ("Remote", []),  # ambíguo: fica desconhecido
+        ("Lisboa, Portugal", ["PT"]),  # city ignored
+        ("Remote", []),  # ambiguous: stays unknown
         ("", []),
         (None, []),
     ],
 )
-def test_interpretar_local(texto: str | None, esperado: list[str]) -> None:
-    assert interpretar_local(texto) == esperado
+def test_parse_location(text: str | None, expected: list[str]) -> None:
+    assert parse_location(text) == expected
 
 
 @pytest.mark.parametrize(
-    ("locais", "paises", "esperado"),
+    ("locations", "countries", "expected"),
     [
-        ([WORLDWIDE], ["PT"], True),
-        (["US"], ["PT"], False),
-        (["LATAM", "EUROPE"], ["PT"], True),
-        (["EU"], ["GB"], False),  # Reino Unido não é UE
+        ([WORLDWIDE], ["BR"], True),
+        (["US"], ["BR"], False),
+        (["LATAM", "EUROPE"], ["BR"], True),
+        (["EU"], ["GB"], False),  # the UK is not in the EU
         (["EUROPE"], ["GB"], True),
         (["EMEA"], ["PT"], True),
         (["US", "CA"], ["BR", "PT"], False),
         (["LATAM"], ["BR", "PT"], True),
-        ([], ["PT"], None),
+        ([], ["BR"], None),
     ],
 )
-def test_elegivel(locais: list[str], paises: list[str], esperado: bool | None) -> None:
-    assert elegivel(locais, paises) is esperado
+def test_is_eligible(locations: list[str], countries: list[str], expected: bool | None) -> None:
+    assert is_eligible(locations, countries) is expected
 
 
 @pytest.mark.parametrize(
-    ("texto", "esperado"),
+    ("text", "expected"),
     [
-        ("$35,3k- $52k", Salario(minimo=35_300, maximo=52_000, moeda="USD", periodo="ano")),
-        ("$14 - $20/hour", Salario(minimo=14, maximo=20, moeda="USD", periodo="hora")),
-        ("OTE $25k - $35k", Salario(minimo=25_000, maximo=35_000, moeda="USD", periodo="ano")),
-        ("$50-$75 /hour", Salario(minimo=50, maximo=75, moeda="USD", periodo="hora")),
-        ("$14/hour", Salario(minimo=14, maximo=14, moeda="USD", periodo="hora")),
-        ("$3.5k–$5k/month", Salario(minimo=3_500, maximo=5_000, moeda="USD", periodo="mes")),  # noqa: RUF001
-        ("70K-80K", Salario(minimo=70_000, maximo=80_000, moeda=None, periodo="ano")),
-        ("$170k - $200k", Salario(minimo=170_000, maximo=200_000, moeda="USD", periodo="ano")),
+        ("$35,3k- $52k", Salary(minimum=35_300, maximum=52_000, currency="USD", period="year")),
+        ("$14 - $20/hour", Salary(minimum=14, maximum=20, currency="USD", period="hour")),
+        ("OTE $25k - $35k", Salary(minimum=25_000, maximum=35_000, currency="USD", period="year")),
+        ("$50-$75 /hour", Salary(minimum=50, maximum=75, currency="USD", period="hour")),
+        ("$14/hour", Salary(minimum=14, maximum=14, currency="USD", period="hour")),
+        ("$3.5k–$5k/month", Salary(minimum=3_500, maximum=5_000, currency="USD", period="month")),  # noqa: RUF001
+        ("70K-80K", Salary(minimum=70_000, maximum=80_000, currency=None, period="year")),
+        (
+            "$170k - $200k",
+            Salary(minimum=170_000, maximum=200_000, currency="USD", period="year"),
+        ),
         (
             "$100,000 - $120,000",
-            Salario(minimo=100_000, maximo=120_000, moeda="USD", periodo="ano"),
+            Salary(minimum=100_000, maximum=120_000, currency="USD", period="year"),
         ),
-        ("€4.000/mês", Salario(minimo=4_000, maximo=4_000, moeda="EUR", periodo="mes")),
-        ("R$ 8.000 - R$ 12.000", Salario(minimo=8_000, maximo=12_000, moeda="BRL", periodo="mes")),
-        ("60-70k EUR", Salario(minimo=60_000, maximo=70_000, moeda="EUR", periodo="ano")),
+        ("€4.000/mês", Salary(minimum=4_000, maximum=4_000, currency="EUR", period="month")),
+        (
+            "R$ 8.000 - R$ 12.000",
+            Salary(minimum=8_000, maximum=12_000, currency="BRL", period="month"),
+        ),
+        ("60-70k EUR", Salary(minimum=60_000, maximum=70_000, currency="EUR", period="year")),
+        # BRL with no period: monthly salary, or an hourly rate when small.
+        ("R$ 150", Salary(minimum=150, maximum=150, currency="BRL", period="hour")),
+        (
+            "R$ 120 a R$ 180 por hora",
+            Salary(minimum=120, maximum=180, currency="BRL", period="hour"),
+        ),
+        ("R$ 25.000", Salary(minimum=25_000, maximum=25_000, currency="BRL", period="month")),
     ],
 )
-def test_interpretar_salario(texto: str, esperado: Salario) -> None:
-    assert interpretar_salario(texto) == esperado
+def test_parse_salary(text: str, expected: Salary) -> None:
+    assert parse_salary(text) == expected
 
 
-@pytest.mark.parametrize("texto", ["$1000 per task", "Competitive", "", None])
-def test_salario_nao_interpretavel(texto: str | None) -> None:
-    assert interpretar_salario(texto) is None
+@pytest.mark.parametrize("text", ["$1000 per task", "Competitive", "", None])
+def test_unparseable_salary(text: str | None) -> None:
+    assert parse_salary(text) is None
 
 
-def test_anual() -> None:
-    assert anual(20, "hora") == 41_600
-    assert anual(4_000, "mes") == 48_000
-    assert anual(50_000, "ano") == 50_000
+def test_yearly() -> None:
+    assert yearly(20, "hour") == 41_600
+    assert yearly(4_000, "month") == 48_000
+    assert yearly(50_000, "year") == 50_000
 
 
-def test_html_para_texto() -> None:
+def test_html_to_text() -> None:
     html = "<p>Olá <b>mundo</b></p><script>x()</script><ul><li>AWS</li><li>Terraform</li></ul>"
-    assert html_para_texto(html) == "Olá\nmundo\nAWS\nTerraform"
-    assert html_para_texto("") is None
-    assert html_para_texto("<p>   </p>") is None
+    assert html_to_text(html) == "Olá\nmundo\nAWS\nTerraform"
+    assert html_to_text("") is None
+    assert html_to_text("<p>   </p>") is None
 
 
-def test_chave() -> None:
-    assert chave("  Engenheiro(a) de Dados — São Paulo! ") == "engenheiro a de dados sao paulo"
+def test_key() -> None:
+    assert key("  Engenheiro(a) de Dados — São Paulo! ") == "engenheiro a de dados sao paulo"

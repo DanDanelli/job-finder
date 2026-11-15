@@ -1,4 +1,4 @@
-"""Cliente, extração de perfil, BM25 e scoring, com um dublê do SDK do Claude (sem rede)."""
+"""Client, profile extraction, BM25 and scoring, with a stand-in for the Claude SDK (no network)."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -14,28 +14,28 @@ from typer.testing import CliRunner
 
 from job_finder.cli import app as cli_app
 from job_finder.db import repo
-from job_finder.db.models import CustoLLMDB, MatchDB
-from job_finder.db.session import sessao
+from job_finder.db.models import LLMCostDB, MatchDB
+from job_finder.db.session import session
 from job_finder.domain import (
-    DadosPerfil,
-    Filtros,
-    Idioma,
-    Perfil,
+    Filters,
+    FitResult,
+    Job,
+    Language,
+    MatchStatus,
+    Profile,
+    ProfileData,
     Query,
-    ResultadoFit,
+    RawJob,
     Skill,
-    StatusMatch,
-    Vaga,
-    VagaBruta,
 )
-from job_finder.llm.client import ClienteLLM, LimiteDeCustoAtingido, RespostaInvalida, custo
-from job_finder.llm.profile_extractor import ExtracaoPerfil, extrair_perfil
-from job_finder.llm.scorer import INSTRUCOES, MAX_TENTATIVAS, pontuar_pendentes
-from job_finder.pipeline.prerank import bm25, preranquear
-from job_finder.pipeline.run import executar_rodada
+from job_finder.llm.client import CostCapReached, InvalidResponse, LLMClient, cost
+from job_finder.llm.profile_extractor import ProfileExtraction, extract_profile
+from job_finder.llm.scorer import INSTRUCTIONS, MAX_ATTEMPTS, score_pending
+from job_finder.pipeline.prerank import bm25, prerank
+from job_finder.pipeline.run import execute_run
 from job_finder.quota import Quota
 
-AGORA = datetime(2026, 11, 15, 12, tzinfo=UTC)
+NOW = datetime(2026, 11, 15, 12, tzinfo=UTC)
 HAIKU = "claude-haiku-5-5"
 OPUS = "claude-opus-5-5"
 
@@ -49,7 +49,7 @@ class Usage:
 
 
 @dataclass
-class Resposta:
+class Response:
     parsed_output: Any
     stop_reason: str = "end_turn"
     usage: Usage | None = None
@@ -58,324 +58,324 @@ class Resposta:
         self.usage = self.usage or Usage()
 
 
-class Mensagens:
-    def __init__(self, responder: Callable[[dict[str, Any]], Resposta]) -> None:
+class Messages:
+    def __init__(self, responder: Callable[[dict[str, Any]], Response]) -> None:
         self.responder = responder
-        self.chamadas: list[dict[str, Any]] = []
+        self.calls: list[dict[str, Any]] = []
 
-    def parse(self, **kw: Any) -> Resposta:
-        self.chamadas.append(kw)
+    def parse(self, **kw: Any) -> Response:
+        self.calls.append(kw)
         return self.responder(kw)
 
 
 class Anthropic:
-    def __init__(self, responder: Callable[[dict[str, Any]], Resposta]) -> None:
-        self.messages = Mensagens(responder)
+    def __init__(self, responder: Callable[[dict[str, Any]], Response]) -> None:
+        self.messages = Messages(responder)
 
 
-def cliente(engine: Engine, responder: Callable[..., Resposta], limite: float = 5.0) -> ClienteLLM:
-    return ClienteLLM(engine, Anthropic(responder), limite_mensal_usd=limite, relogio=lambda: AGORA)
+def client(engine: Engine, responder: Callable[..., Response], cap: float = 5.0) -> LLMClient:
+    return LLMClient(engine, Anthropic(responder), monthly_cap_usd=cap, clock=lambda: NOW)
 
 
-def fit(score: int = 80, **kw: Any) -> ResultadoFit:
-    return ResultadoFit(score=score, resumo="ok", **kw)
+def fit(score: int = 80, **kw: Any) -> FitResult:
+    return FitResult(score=score, summary="ok", **kw)
 
 
-# --- custo e teto -------------------------------------------------------------
+# --- cost and cap --------------------------------------------------------------
 
 
-def test_custo_por_modelo_com_cache_e_batch() -> None:
+def test_cost_per_model_with_cache_and_batch() -> None:
     u = Usage(
         input_tokens=1_000_000,
         output_tokens=1_000_000,
         cache_read_input_tokens=1_000_000,
         cache_creation_input_tokens=1_000_000,
     )
-    assert custo(HAIKU, u) == pytest.approx(0.10 + 0.50 + 0.01 + 0.125)
-    assert custo(OPUS, Usage(input_tokens=1_000_000, output_tokens=0)) == pytest.approx(4.0)
-    assert custo(HAIKU, u, batch=True) == pytest.approx((0.10 + 0.50 + 0.01 + 0.125) / 2)
-    assert custo("modelo-desconhecido", u) == 0.0
+    assert cost(HAIKU, u) == pytest.approx(0.10 + 0.50 + 0.01 + 0.125)
+    assert cost(OPUS, Usage(input_tokens=1_000_000, output_tokens=0)) == pytest.approx(4.0)
+    assert cost(HAIKU, u, batch=True) == pytest.approx((0.10 + 0.50 + 0.01 + 0.125) / 2)
+    assert cost("unknown-model", u) == 0.0
 
 
-def test_registra_custo_e_respeita_o_teto_mensal(engine: Engine) -> None:
-    c = cliente(engine, lambda kw: Resposta(fit()), limite=0.0005)
-    c.estruturado(ResultadoFit, operacao="scoring", modelo=HAIKU, max_tokens=10, messages=[])
-    # 1000 in x 0.10 + 200 out x 0.50 = 0.0002 por chamada
-    assert c.gasto_no_mes() == pytest.approx(0.0002)
-    c.estruturado(ResultadoFit, operacao="scoring", modelo=HAIKU, max_tokens=10, messages=[])
-    c.estruturado(ResultadoFit, operacao="scoring", modelo=HAIKU, max_tokens=10, messages=[])
-    with pytest.raises(LimiteDeCustoAtingido):
-        c.estruturado(ResultadoFit, operacao="scoring", modelo=HAIKU, max_tokens=10, messages=[])
-    assert len(c.anthropic.messages.chamadas) == 3  # a quarta nem foi feita
+def test_records_cost_and_respects_the_monthly_cap(engine: Engine) -> None:
+    c = client(engine, lambda kw: Response(fit()), cap=0.0005)
+    c.structured(FitResult, operation="scoring", model=HAIKU, max_tokens=10, messages=[])
+    # 1000 in x 0.10 + 200 out x 0.50 = 0.0002 per call
+    assert c.spent_this_month() == pytest.approx(0.0002)
+    c.structured(FitResult, operation="scoring", model=HAIKU, max_tokens=10, messages=[])
+    c.structured(FitResult, operation="scoring", model=HAIKU, max_tokens=10, messages=[])
+    with pytest.raises(CostCapReached):
+        c.structured(FitResult, operation="scoring", model=HAIKU, max_tokens=10, messages=[])
+    assert len(c.anthropic.messages.calls) == 3  # the fourth was never made
 
 
-def test_gasto_do_mes_anterior_nao_conta(engine: Engine) -> None:
-    passado = ClienteLLM(
+def test_last_months_spend_does_not_count(engine: Engine) -> None:
+    past = LLMClient(
         engine,
         None,
-        limite_mensal_usd=1,
-        relogio=lambda: datetime(2026, 10, 31, 23, 59, tzinfo=UTC),
+        monthly_cap_usd=1,
+        clock=lambda: datetime(2026, 10, 31, 23, 59, tzinfo=UTC),
     )
-    passado.registrar("scoring", OPUS, Usage(input_tokens=1_000_000, output_tokens=0))
-    assert passado.gasto_no_mes() == pytest.approx(4.0)
-    assert cliente(engine, lambda kw: Resposta(fit())).gasto_no_mes() == 0.0
+    past.record("scoring", OPUS, Usage(input_tokens=1_000_000, output_tokens=0))
+    assert past.spent_this_month() == pytest.approx(4.0)
+    assert client(engine, lambda kw: Response(fit())).spent_this_month() == 0.0
 
 
 @pytest.mark.parametrize(
-    "resposta",
+    "response",
     [
-        Resposta(None, stop_reason="refusal"),
-        Resposta(None, stop_reason="max_tokens"),
-        Resposta(None),
+        Response(None, stop_reason="refusal"),
+        Response(None, stop_reason="max_tokens"),
+        Response(None),
     ],
 )
-def test_resposta_invalida_levanta_mas_registra_o_custo(engine: Engine, resposta: Resposta) -> None:
-    c = cliente(engine, lambda kw: resposta)
-    with pytest.raises(RespostaInvalida):
-        c.estruturado(ResultadoFit, operacao="scoring", modelo=HAIKU, max_tokens=10, messages=[])
-    assert c.gasto_no_mes() > 0
+def test_invalid_response_raises_but_records_the_cost(engine: Engine, response: Response) -> None:
+    c = client(engine, lambda kw: response)
+    with pytest.raises(InvalidResponse):
+        c.structured(FitResult, operation="scoring", model=HAIKU, max_tokens=10, messages=[])
+    assert c.spent_this_month() > 0
 
 
-# --- extração de perfil -------------------------------------------------------
+# --- profile extraction -------------------------------------------------------
 
 
-def test_extrair_perfil_envia_o_pdf_e_devolve_os_dados(engine: Engine, tmp_path: Path) -> None:
+def test_extract_profile_sends_the_pdf_and_returns_the_data(engine: Engine, tmp_path: Path) -> None:
     pdf = tmp_path / "cv.pdf"
     pdf.write_bytes(b"%PDF-1.4 fake")
-    esperado = ExtracaoPerfil(
-        dados=DadosPerfil(resumo="Arquiteto cloud", cargos=["Cloud Architect"]),
-        termos_busca=["Cloud Architect"],
+    expected = ProfileExtraction(
+        data=ProfileData(summary="Cloud architect", roles=["Cloud Architect"]),
+        search_terms=["Cloud Architect"],
     )
-    c = cliente(engine, lambda kw: Resposta(esperado))
+    c = client(engine, lambda kw: Response(expected))
 
-    assert extrair_perfil(c, pdf, modelo=OPUS) == esperado
+    assert extract_profile(c, pdf, model=OPUS, language="pt-BR") == expected
 
-    chamada = c.anthropic.messages.chamadas[0]
-    assert chamada["model"] == OPUS
-    assert chamada["output_format"] is ExtracaoPerfil
-    assert chamada["output_config"] == {"effort": "high"}
-    documento = chamada["messages"][0]["content"][0]
-    assert documento["type"] == "document"
-    assert documento["source"]["media_type"] == "application/pdf"
-    with sessao(engine) as s:
-        assert s.scalars(select(CustoLLMDB.operacao)).all() == ["extrair_perfil"]
+    call = c.anthropic.messages.calls[0]
+    assert call["model"] == OPUS
+    assert call["output_format"] is ProfileExtraction
+    assert call["output_config"] == {"effort": "high"}
+    document = call["messages"][0]["content"][0]
+    assert document["type"] == "document"
+    assert document["source"]["media_type"] == "application/pdf"
+    with session(engine) as s:
+        assert s.scalars(select(LLMCostDB.operation)).all() == ["extract_profile"]
 
 
 # --- BM25 ---------------------------------------------------------------------
 
 
-def test_bm25_prefere_documento_com_mais_termos_da_consulta() -> None:
-    docs = [["aws", "terraform", "kubernetes"], ["excel", "vendas"], ["aws", "vendas"]]
+def test_bm25_prefers_the_document_with_more_query_terms() -> None:
+    docs = [["aws", "terraform", "kubernetes"], ["excel", "sales"], ["aws", "sales"]]
     s = bm25(["aws", "terraform"], docs)
     assert s[0] > s[2] > s[1] == 0.0
     assert bm25(["aws"], []) == []
 
 
-def test_preranquear_usa_titulo_skills_e_queries() -> None:
-    perfil = Perfil(
-        nome="d",
-        dados=DadosPerfil(cargos=["Cloud Architect"], skills=[Skill(nome="AWS", peso=5)]),
-        queries=[Query(termo="DevOps Lead")],
+def test_prerank_uses_title_skills_and_queries() -> None:
+    profile = Profile(
+        name="d",
+        data=ProfileData(roles=["Cloud Architect"], skills=[Skill(name="AWS", weight=5)]),
+        queries=[Query(term="DevOps Lead")],
     )
-    vagas = [
-        Vaga(titulo="Brand Manager", url="https://x/1", descricao="marketing de moda"),
-        Vaga(titulo="Cloud Architect", url="https://x/2", descricao="AWS, landing zones"),
-        Vaga(titulo="DevOps Lead", url="https://x/3", descricao="CI/CD"),
+    jobs = [
+        Job(title="Brand Manager", url="https://x/1", description="fashion marketing"),
+        Job(title="Cloud Architect", url="https://x/2", description="AWS, landing zones"),
+        Job(title="DevOps Lead", url="https://x/3", description="CI/CD"),
     ]
-    s = preranquear(perfil, vagas)
+    s = prerank(profile, jobs)
     assert s[1] > s[2] > s[0]
 
 
 # --- scoring ------------------------------------------------------------------
 
 
-def preparar(engine: Engine, vagas: list[VagaBruta]) -> int:
-    with sessao(engine) as s:
-        repo.salvar_perfil(
+def prepare(engine: Engine, jobs: list[RawJob]) -> int:
+    with session(engine) as s:
+        repo.save_profile(
             s,
-            Perfil(
-                nome="daniel",
-                dados=DadosPerfil(
-                    resumo="Arquiteto cloud sênior",
-                    cargos=["Cloud Architect"],
-                    skills=[Skill(nome="AWS", peso=5), Skill(nome="Terraform", peso=4)],
-                    idiomas=[Idioma(codigo="pt", nivel="nativo")],
+            Profile(
+                name="daniel",
+                data=ProfileData(
+                    summary="Senior cloud architect",
+                    roles=["Cloud Architect"],
+                    skills=[Skill(name="AWS", weight=5), Skill(name="Terraform", weight=4)],
+                    languages=[Language(code="pt", level="native")],
                 ),
-                queries=[Query(termo="Cloud Architect")],
-                filtros=Filtros(remoto_a_partir_de=["PT"], idiomas=["pt", "en"]),
-                preferencias="Nada de consultoria body shop.",
+                queries=[Query(term="Cloud Architect")],
+                filters=Filters(remote_from=["PT"], languages=["pt", "en"]),
+                preferences="No body shop consultancies.",
             ),
         )
 
-    class Fonte:
-        nome = "f"
-        limite_diario = None
+    class Source:
+        name = "f"
+        daily_limit = None
 
-        def buscar(self, queries: object, quota: Quota) -> list[VagaBruta]:
-            return vagas
+        def search(self, queries: object, quota: Quota) -> list[RawJob]:
+            return jobs
 
-    with sessao(engine) as s:
-        executar_rodada(s, engine, [Fonte()], repo.listar_perfis(s), AGORA)
-        perfil = repo.buscar_perfil(s, "daniel")
-        assert perfil is not None
-        return perfil.id
+    with session(engine) as s:
+        execute_run(s, engine, [Source()], repo.list_profiles(s), NOW)
+        profile = repo.find_profile(s, "daniel")
+        assert profile is not None
+        return profile.id
 
 
-def bruta(id_fonte: str, titulo: str, descricao: str = "", **kw: Any) -> VagaBruta:
+def raw(source_id: str, title: str, description: str = "", **kw: Any) -> RawJob:
     base: dict[str, Any] = {
-        "fonte": "f",
-        "id_fonte": id_fonte,
-        "titulo": titulo,
-        "empresa": f"Empresa {id_fonte}",
-        "descricao": descricao,
-        "local": "Europe",
-        "modalidade": "remote",
-        "url": f"https://f.example/{id_fonte}",
-        "publicada_em": AGORA - timedelta(days=1),
+        "source": "f",
+        "source_id": source_id,
+        "title": title,
+        "company": f"Company {source_id}",
+        "description": description,
+        "location": "Europe",
+        "work_mode": "remote",
+        "url": f"https://f.example/{source_id}",
+        "posted_at": NOW - timedelta(days=1),
     }
-    return VagaBruta.model_validate(base | kw)
+    return RawJob.model_validate(base | kw)
 
 
-VAGAS = [
-    bruta("1", "Cloud Architect", "AWS Terraform landing zones"),
-    bruta("2", "Brand Manager", "Fashion marketing"),
-    bruta("3", "Senior Cloud Engineer", "AWS"),
+JOBS = [
+    raw("1", "Cloud Architect", "AWS Terraform landing zones"),
+    raw("2", "Brand Manager", "Fashion marketing"),
+    raw("3", "Senior Cloud Engineer", "AWS"),
 ]
 
 
-def pontuar(engine: Engine, c: ClienteLLM, perfil_id: int, top_n: int = 10) -> Any:
-    return pontuar_pendentes(engine, c, perfil_id, modelo=HAIKU, top_n=top_n, agora=AGORA)
+def score(engine: Engine, c: LLMClient, profile_id: int, top_n: int = 10) -> Any:
+    return score_pending(engine, c, profile_id, model=HAIKU, language="en", top_n=top_n, now=NOW)
 
 
 def matches(engine: Engine) -> dict[str, MatchDB]:
-    with sessao(engine) as s:
-        todos = s.scalars(select(MatchDB)).all()
-        for m in todos:
-            _ = m.vaga.titulo
+    with session(engine) as s:
+        everything = s.scalars(select(MatchDB)).all()
+        for m in everything:
+            _ = m.job.title
         s.expunge_all()
-        return {m.vaga.titulo: m for m in todos}
+        return {m.job.title: m for m in everything}
 
 
-def test_pontua_as_top_n_do_bm25_e_grava_o_resultado(engine: Engine) -> None:
-    perfil_id = preparar(engine, VAGAS)
-    c = cliente(
+def test_scores_the_bm25_top_n_and_stores_the_result(engine: Engine) -> None:
+    profile_id = prepare(engine, JOBS)
+    c = client(
         engine,
-        lambda kw: Resposta(fit(91, pontos_fortes=["AWS"], gaps=["Azure"])),
+        lambda kw: Response(fit(91, strengths=["AWS"], gaps=["Azure"])),
     )
 
-    r = pontuar(engine, c, perfil_id, top_n=2)
+    r = score(engine, c, profile_id, top_n=2)
 
-    assert (r.pendentes, r.avaliadas, r.falhas) == (3, 2, [])
+    assert (r.pending, r.scored, r.failures) == (3, 2, [])
     m = matches(engine)
-    # O BM25 manda as duas vagas de cloud para o LLM e deixa a de marketing pendente.
-    assert m["Cloud Architect"].status == StatusMatch.NOVA
+    # BM25 sends the two cloud jobs to the LLM and leaves the marketing one pending.
+    assert m["Cloud Architect"].status == MatchStatus.NEW
     assert m["Cloud Architect"].score == 91
-    assert m["Cloud Architect"].pontos_fortes == ["AWS"]
-    assert m["Cloud Architect"].modelo == HAIKU
-    assert m["Senior Cloud Engineer"].status == StatusMatch.NOVA
-    assert m["Brand Manager"].status == StatusMatch.PENDENTE
-    assert m["Brand Manager"].score_prerank is not None
-    assert m["Cloud Architect"].score_prerank > m["Brand Manager"].score_prerank  # type: ignore[operator]
+    assert m["Cloud Architect"].strengths == ["AWS"]
+    assert m["Cloud Architect"].model == HAIKU
+    assert m["Senior Cloud Engineer"].status == MatchStatus.NEW
+    assert m["Brand Manager"].status == MatchStatus.PENDING
+    assert m["Brand Manager"].prerank_score is not None
+    assert m["Cloud Architect"].prerank_score > m["Brand Manager"].prerank_score  # type: ignore[operator]
 
-    with sessao(engine) as s:
-        custos = s.scalars(select(CustoLLMDB)).all()
-        assert [(x.operacao, x.perfil_id) for x in custos] == [("scoring", perfil_id)] * 2
-
-
-def test_prefixo_do_prompt_e_estavel_e_marcado_para_cache(engine: Engine) -> None:
-    perfil_id = preparar(engine, VAGAS)
-    c = cliente(engine, lambda kw: Resposta(fit()))
-    pontuar(engine, c, perfil_id)
-
-    chamadas = c.anthropic.messages.chamadas
-    assert len(chamadas) == 3
-    assert all(ch["system"] == chamadas[0]["system"] for ch in chamadas)  # mesmo prefixo
-    instrucoes, perfil = chamadas[0]["system"]
-    assert instrucoes["text"] == INSTRUCOES
-    assert perfil["cache_control"] == {"type": "ephemeral"}
-    assert "Terraform" in perfil["text"] and "body shop" in perfil["text"]
-    assert chamadas[0]["output_config"] == {"effort": "low"}
-    # Só a vaga muda, na mensagem do usuário, delimitada como dado.
-    assert len({ch["messages"][0]["content"] for ch in chamadas}) == 3
-    assert chamadas[0]["messages"][0]["content"].startswith("<vaga>")
+    with session(engine) as s:
+        costs = s.scalars(select(LLMCostDB)).all()
+        assert [(x.operation, x.profile_id) for x in costs] == [("scoring", profile_id)] * 2
 
 
-def test_falha_deixa_pendente_e_nao_para_as_outras(engine: Engine) -> None:
-    perfil_id = preparar(engine, VAGAS)
+def test_prompt_prefix_is_stable_and_marked_for_caching(engine: Engine) -> None:
+    profile_id = prepare(engine, JOBS)
+    c = client(engine, lambda kw: Response(fit()))
+    score(engine, c, profile_id)
 
-    def responder(kw: dict[str, Any]) -> Resposta:
-        conteudo = kw["messages"][0]["content"]
-        if "Brand Manager" in conteudo:
-            return Resposta(None, stop_reason="refusal")
-        if "Senior Cloud Engineer" in conteudo:
+    calls = c.anthropic.messages.calls
+    assert len(calls) == 3
+    assert all(ch["system"] == calls[0]["system"] for ch in calls)  # same prefix
+    instructions, profile = calls[0]["system"]
+    assert instructions["text"] == INSTRUCTIONS.format(language="English")
+    assert profile["cache_control"] == {"type": "ephemeral"}
+    assert "Terraform" in profile["text"] and "body shop" in profile["text"]
+    assert calls[0]["output_config"] == {"effort": "low"}
+    # Only the job changes, in the user message, delimited as data.
+    assert len({ch["messages"][0]["content"] for ch in calls}) == 3
+    assert calls[0]["messages"][0]["content"].startswith("<job>")
+
+
+def test_failure_leaves_it_pending_and_does_not_stop_the_others(engine: Engine) -> None:
+    profile_id = prepare(engine, JOBS)
+
+    def responder(kw: dict[str, Any]) -> Response:
+        content = kw["messages"][0]["content"]
+        if "Brand Manager" in content:
+            return Response(None, stop_reason="refusal")
+        if "Senior Cloud Engineer" in content:
             raise anthropic.APIConnectionError(request=httpx.Request("POST", "https://api"))
-        return Resposta(fit())
+        return Response(fit())
 
-    r = pontuar(engine, cliente(engine, responder), perfil_id)
+    r = score(engine, client(engine, responder), profile_id)
 
-    assert r.avaliadas == 1
-    assert len(r.falhas) == 2
+    assert r.scored == 1
+    assert len(r.failures) == 2
     m = matches(engine)
-    assert m["Cloud Architect"].status == StatusMatch.NOVA
-    assert (m["Brand Manager"].status, m["Brand Manager"].tentativas) == (StatusMatch.PENDENTE, 1)
-    assert m["Senior Cloud Engineer"].tentativas == 1
+    assert m["Cloud Architect"].status == MatchStatus.NEW
+    assert (m["Brand Manager"].status, m["Brand Manager"].attempts) == (MatchStatus.PENDING, 1)
+    assert m["Senior Cloud Engineer"].attempts == 1
 
 
-def test_nao_reavalia_e_desiste_apos_max_tentativas(engine: Engine) -> None:
-    perfil_id = preparar(engine, VAGAS[:1])
-    recusa = cliente(engine, lambda kw: Resposta(None, stop_reason="refusal"))
-    for _ in range(MAX_TENTATIVAS):
-        pontuar(engine, recusa, perfil_id)
-    assert len(recusa.anthropic.messages.chamadas) == MAX_TENTATIVAS
+def test_does_not_rescore_and_gives_up_after_max_attempts(engine: Engine) -> None:
+    profile_id = prepare(engine, JOBS[:1])
+    refusal = client(engine, lambda kw: Response(None, stop_reason="refusal"))
+    for _ in range(MAX_ATTEMPTS):
+        score(engine, refusal, profile_id)
+    assert len(refusal.anthropic.messages.calls) == MAX_ATTEMPTS
 
-    depois = cliente(engine, lambda kw: Resposta(fit()))
-    assert pontuar(engine, depois, perfil_id).pendentes == 0
-    assert depois.anthropic.messages.chamadas == []
-
-
-def test_vaga_ja_pontuada_nao_volta_para_o_llm(engine: Engine) -> None:
-    perfil_id = preparar(engine, VAGAS)
-    pontuar(engine, cliente(engine, lambda kw: Resposta(fit())), perfil_id)
-    segunda = cliente(engine, lambda kw: Resposta(fit()))
-    assert pontuar(engine, segunda, perfil_id).avaliadas == 0
-    assert segunda.anthropic.messages.chamadas == []
+    after = client(engine, lambda kw: Response(fit()))
+    assert score(engine, after, profile_id).pending == 0
+    assert after.anthropic.messages.calls == []
 
 
-def test_teto_de_custo_interrompe_o_scoring(engine: Engine) -> None:
-    perfil_id = preparar(engine, VAGAS)
-    c = cliente(engine, lambda kw: Resposta(fit()), limite=0.0003)  # cabem 2 chamadas
-    r = pontuar(engine, c, perfil_id)
-    assert r.avaliadas == 2
-    assert r.interrompido and "teto mensal" in r.interrompido
-    assert sum(m.status == StatusMatch.PENDENTE for m in matches(engine).values()) == 1
+def test_scored_job_does_not_go_back_to_the_llm(engine: Engine) -> None:
+    profile_id = prepare(engine, JOBS)
+    score(engine, client(engine, lambda kw: Response(fit())), profile_id)
+    second = client(engine, lambda kw: Response(fit()))
+    assert score(engine, second, profile_id).scored == 0
+    assert second.anthropic.messages.calls == []
 
 
-def _erro(classe: type[anthropic.APIStatusError], status: int, msg: str) -> Exception:
-    resposta = httpx.Response(status, request=httpx.Request("POST", "https://api"))
-    return classe(msg, response=resposta, body={"error": {"message": msg}})
+def test_cost_cap_interrupts_scoring(engine: Engine) -> None:
+    profile_id = prepare(engine, JOBS)
+    c = client(engine, lambda kw: Response(fit()), cap=0.0003)  # room for 2 calls
+    r = score(engine, c, profile_id)
+    assert r.scored == 2
+    assert r.interrupted and "monthly Claude cap" in r.interrupted
+    assert sum(m.status == MatchStatus.PENDING for m in matches(engine).values()) == 1
+
+
+def _error(cls: type[anthropic.APIStatusError], status: int, msg: str) -> Exception:
+    response = httpx.Response(status, request=httpx.Request("POST", "https://api"))
+    return cls(msg, response=response, body={"error": {"message": msg}})
 
 
 @pytest.mark.parametrize(
-    "erro",
+    "error",
     [
-        _erro(anthropic.AuthenticationError, 401, "invalid x-api-key"),
-        _erro(anthropic.BadRequestError, 400, "Your credit balance is too low to access"),
+        _error(anthropic.AuthenticationError, 401, "invalid x-api-key"),
+        _error(anthropic.BadRequestError, 400, "Your credit balance is too low to access"),
     ],
 )
-def test_erro_da_conta_interrompe_sem_gastar_tentativas(engine: Engine, erro: Exception) -> None:
-    perfil_id = preparar(engine, VAGAS)
+def test_account_error_interrupts_without_using_attempts(engine: Engine, error: Exception) -> None:
+    profile_id = prepare(engine, JOBS)
 
-    def responder(kw: dict[str, Any]) -> Resposta:
-        raise erro
+    def responder(kw: dict[str, Any]) -> Response:
+        raise error
 
-    c = cliente(engine, responder)
-    with pytest.raises(type(erro)):
-        pontuar(engine, c, perfil_id)
-    assert len(c.anthropic.messages.chamadas) == 1
-    assert all(m.tentativas == 0 for m in matches(engine).values())
+    c = client(engine, responder)
+    with pytest.raises(type(error)):
+        score(engine, c, profile_id)
+    assert len(c.anthropic.messages.calls) == 1
+    assert all(m.attempts == 0 for m in matches(engine).values())
 
 
-def test_cli_mostra_erro_da_api_sem_traceback(
+def test_cli_shows_api_error_without_traceback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from job_finder.config import get_settings
@@ -384,17 +384,17 @@ def test_cli_mostra_erro_da_api_sem_traceback(
 
     upgrade(get_settings().resolved_database_url)
 
-    def responder(kw: dict[str, Any]) -> Resposta:
-        raise _erro(anthropic.BadRequestError, 400, "Your credit balance is too low")
+    def responder(kw: dict[str, Any]) -> Response:
+        raise _error(anthropic.BadRequestError, 400, "Your credit balance is too low")
 
     monkeypatch.setattr(
         client_mod,
-        "criar_cliente",
-        lambda eng: ClienteLLM(eng, Anthropic(responder), limite_mensal_usd=5),
+        "make_client",
+        lambda eng: LLMClient(eng, Anthropic(responder), monthly_cap_usd=5),
     )
     pdf = tmp_path / "cv.pdf"
     pdf.write_bytes(b"%PDF-1.4 fake")
-    r = CliRunner().invoke(cli_app, ["perfil", "importar", str(pdf), "-p", "x"])
+    r = CliRunner().invoke(cli_app, ["profile", "import", str(pdf), "-p", "x"])
     assert r.exit_code == 1
     assert "credit balance is too low" in r.output
     assert "Traceback" not in r.output
@@ -403,66 +403,66 @@ def test_cli_mostra_erro_da_api_sem_traceback(
 # --- CLI ----------------------------------------------------------------------
 
 
-def test_cli_importar_preenche_o_perfil(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cli_import_fills_in_the_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from job_finder.config import get_settings
-    from job_finder.db.session import criar_engine, upgrade
+    from job_finder.db.session import make_engine, upgrade
     from job_finder.llm import client as client_mod
 
     url = get_settings().resolved_database_url
     upgrade(url)
-    engine = criar_engine(url)
-    extracao = ExtracaoPerfil(
-        dados=DadosPerfil(resumo="Arquiteta de marca", cargos=["Brand Manager"]),
-        termos_busca=["Brand Manager", "Marketing Manager"],
+    engine = make_engine(url)
+    extraction = ProfileExtraction(
+        data=ProfileData(summary="Brand architect", roles=["Brand Manager"]),
+        search_terms=["Brand Manager", "Marketing Manager"],
     )
     monkeypatch.setattr(
         client_mod,
-        "criar_cliente",
-        lambda eng: ClienteLLM(eng, Anthropic(lambda kw: Resposta(extracao)), limite_mensal_usd=5),
+        "make_client",
+        lambda eng: LLMClient(eng, Anthropic(lambda kw: Response(extraction)), monthly_cap_usd=5),
     )
     pdf = tmp_path / "cv.pdf"
     pdf.write_bytes(b"%PDF-1.4 fake")
 
     runner = CliRunner()
-    r = runner.invoke(cli_app, ["perfil", "importar", str(pdf), "--perfil", "esposa"])
+    r = runner.invoke(cli_app, ["profile", "import", str(pdf), "--profile", "partner"])
     assert r.exit_code == 0, r.output
 
-    with sessao(engine) as s:
-        db = repo.buscar_perfil(s, "esposa")
+    with session(engine) as s:
+        db = repo.find_profile(s, "partner")
         assert db is not None
-        perfil = repo.perfil_de(db)
-        assert db.curriculo_path and Path(db.curriculo_path).exists()
-    assert perfil.dados.cargos == ["Brand Manager"]
-    assert [(q.termo, q.ativa) for q in perfil.queries] == [
+        profile = repo.profile_from(db)
+        assert db.resume_path and Path(db.resume_path).exists()
+    assert profile.data.roles == ["Brand Manager"]
+    assert [(q.term, q.active) for q in profile.queries] == [
         ("Brand Manager", True),
         ("Marketing Manager", True),
     ]
 
-    # Exportar e carregar de volta preserva tudo; YAML sem `dados` não apaga os extraídos.
-    exportado = runner.invoke(cli_app, ["perfil", "exportar", "esposa"])
-    assert exportado.exit_code == 0, exportado.output
-    yaml_sem_dados = tmp_path / "esposa.yaml"
-    yaml_sem_dados.write_text("nome: esposa\nqueries:\n  - termo: Brand Manager\n")
-    assert runner.invoke(cli_app, ["perfil", "carregar", str(yaml_sem_dados)]).exit_code == 0
-    with sessao(engine) as s:
-        db = repo.buscar_perfil(s, "esposa")
+    # Export and load back keeps everything; a YAML without `data` keeps the extracted data.
+    exported = runner.invoke(cli_app, ["profile", "export", "partner"])
+    assert exported.exit_code == 0, exported.output
+    yaml_without_data = tmp_path / "partner.yaml"
+    yaml_without_data.write_text("name: partner\nqueries:\n  - term: Brand Manager\n")
+    assert runner.invoke(cli_app, ["profile", "load", str(yaml_without_data)]).exit_code == 0
+    with session(engine) as s:
+        db = repo.find_profile(s, "partner")
         assert db is not None
-        assert repo.perfil_de(db).dados.cargos == ["Brand Manager"]
-    assert "Arquiteta de marca" in exportado.output
+        assert repo.profile_from(db).data.roles == ["Brand Manager"]
+    assert "Brand architect" in exported.output
 
 
-def test_cli_pontuar_sem_chave_falha_com_mensagem() -> None:
-    r = CliRunner().invoke(cli_app, ["pontuar"])
+def test_cli_score_without_key_fails_with_a_message() -> None:
+    r = CliRunner().invoke(cli_app, ["score"])
     assert r.exit_code != 0
     assert "ANTHROPIC_API_KEY" in r.output
 
 
-def test_bloco_do_perfil_traz_o_minimo_por_contrato() -> None:
-    from job_finder.domain import Salario
-    from job_finder.llm.scorer import bloco_perfil
+def test_profile_block_has_the_minimum_per_contract() -> None:
+    from job_finder.domain import Salary
+    from job_finder.llm.scorer import profile_block
 
-    filtros = Filtros(
-        salario_minimo_por_contrato={"contrato": Salario(minimo=30_000, moeda="BRL", periodo="mes")}
+    filters = Filters(
+        min_salary_by_contract={"contract": Salary(minimum=30_000, currency="BRL", period="month")}
     )
-    bloco = bloco_perfil(Perfil(nome="x", filtros=filtros))
-    assert "PJ / contractor" in bloco and "30000" in bloco
+    block = profile_block(Profile(name="x", filters=filters))
+    assert "contractor (PJ in Brazil)" in block and "30000" in block

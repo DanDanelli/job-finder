@@ -1,8 +1,8 @@
-"""Cliente do Claude com registro de custo por chamada e teto mensal.
+"""Claude client that records the cost of each call and enforces a monthly cap.
 
-Cada resposta tem o `usage` gravado em `custo_llm` numa transação própria, para o gasto
-contar mesmo se a operação que chamou o LLM falhar depois. Antes de cada chamada o gasto
-do mês (UTC) é comparado com o teto configurado.
+Each response has its `usage` stored in `llm_costs` in its own transaction, so the spend
+counts even if the operation that called the LLM fails later. Before each call the
+month's spend (UTC) is checked against the configured cap.
 """
 
 import logging
@@ -14,8 +14,8 @@ from typing import Any, Protocol, TypeVar
 from pydantic import BaseModel
 from sqlalchemy import Engine, func, select
 
-from job_finder.db.models import CustoLLMDB
-from job_finder.db.session import sessao
+from job_finder.db.models import LLMCostDB
+from job_finder.db.session import session
 
 log = logging.getLogger(__name__)
 
@@ -23,33 +23,33 @@ T = TypeVar("T", bound=BaseModel)
 
 
 @dataclass(frozen=True)
-class Preco:
-    """USD por milhão de tokens."""
+class Price:
+    """USD per million tokens."""
 
-    entrada: float
-    saida: float
-    cache_leitura: float
-    cache_escrita: float  # TTL de 5 minutos (1,25x a entrada)
+    input: float
+    output: float
+    cache_read: float
+    cache_write: float  # 5-minute TTL (1.25x input)
 
 
-# Preços de lista em 2026-11. O Haiku 5.5 cobra 5x acima de 100K tokens de prompt;
-# os prompts daqui ficam muito abaixo disso.
-PRECOS: dict[str, Preco] = {
-    "claude-haiku-5-5": Preco(entrada=0.10, saida=0.50, cache_leitura=0.01, cache_escrita=0.125),
-    "claude-opus-5-5": Preco(entrada=4.00, saida=20.00, cache_leitura=0.20, cache_escrita=5.00),
+# List prices as of 2026-11. Haiku 5.5 charges 5x above 100K prompt tokens; the prompts
+# here stay far below that.
+PRICES: dict[str, Price] = {
+    "claude-haiku-5-5": Price(input=0.10, output=0.50, cache_read=0.01, cache_write=0.125),
+    "claude-opus-5-5": Price(input=4.00, output=20.00, cache_read=0.20, cache_write=5.00),
 }
-DESCONTO_BATCH = 0.5
+BATCH_DISCOUNT = 0.5
 
 
-class LimiteDeCustoAtingido(Exception):
-    def __init__(self, gasto: float, limite: float) -> None:
-        super().__init__(f"teto mensal do Claude atingido (US$ {gasto:.2f} de US$ {limite:.2f})")
-        self.gasto = gasto
-        self.limite = limite
+class CostCapReached(Exception):
+    def __init__(self, spent: float, cap: float) -> None:
+        super().__init__(f"monthly Claude cap reached (US$ {spent:.2f} of US$ {cap:.2f})")
+        self.spent = spent
+        self.cap = cap
 
 
-class RespostaInvalida(Exception):
-    """O modelo respondeu, mas sem uma saída estruturada utilizável."""
+class InvalidResponse(Exception):
+    """The model answered, but without usable structured output."""
 
 
 class _Usage(Protocol):
@@ -59,10 +59,10 @@ class _Usage(Protocol):
     cache_creation_input_tokens: int | None
 
 
-def erro_fatal(e: Exception) -> bool:
-    """Erros da conta (chave, permissão, saldo) que valem para todas as chamadas.
+def is_fatal(e: Exception) -> bool:
+    """Account errors (key, permission, balance) that apply to every call.
 
-    Não adianta seguir para a próxima vaga nem gastar as tentativas do match.
+    There is no point moving on to the next job or spending the match's attempts.
     """
     import anthropic
 
@@ -71,132 +71,130 @@ def erro_fatal(e: Exception) -> bool:
     return isinstance(e, anthropic.BadRequestError) and "credit balance" in str(e).lower()
 
 
-def custo(modelo: str, usage: _Usage, *, batch: bool = False) -> float:
-    preco = PRECOS.get(modelo)
-    if preco is None:
-        log.warning("modelo sem preço cadastrado: %s; custo registrado como 0", modelo)
+def cost(model: str, usage: _Usage, *, batch: bool = False) -> float:
+    price = PRICES.get(model)
+    if price is None:
+        log.warning("no price for model %s; cost recorded as 0", model)
         return 0.0
     total = (
-        usage.input_tokens * preco.entrada
-        + usage.output_tokens * preco.saida
-        + (usage.cache_read_input_tokens or 0) * preco.cache_leitura
-        + (usage.cache_creation_input_tokens or 0) * preco.cache_escrita
+        usage.input_tokens * price.input
+        + usage.output_tokens * price.output
+        + (usage.cache_read_input_tokens or 0) * price.cache_read
+        + (usage.cache_creation_input_tokens or 0) * price.cache_write
     ) / 1_000_000
-    return total * DESCONTO_BATCH if batch else total
+    return total * BATCH_DISCOUNT if batch else total
 
 
-def inicio_do_mes(agora: datetime) -> datetime:
-    return agora.astimezone(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+def start_of_month(now: datetime) -> datetime:
+    return now.astimezone(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
-class ClienteLLM:
+class LLMClient:
     def __init__(
         self,
         engine: Engine,
-        anthropic: Any,  # anthropic.Anthropic; Any para aceitar dublês nos testes
+        anthropic: Any,  # anthropic.Anthropic; Any so tests can pass fakes
         *,
-        limite_mensal_usd: float,
-        relogio: Callable[[], datetime] = lambda: datetime.now(UTC),
+        monthly_cap_usd: float,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self.engine = engine
         self.anthropic = anthropic
-        self.limite_mensal_usd = limite_mensal_usd
-        self.relogio = relogio
+        self.monthly_cap_usd = monthly_cap_usd
+        self.clock = clock
 
-    def gasto_no_mes(self) -> float:
-        with sessao(self.engine, commit=False) as s:
+    def spent_this_month(self) -> float:
+        with session(self.engine, commit=False) as s:
             total = s.scalar(
-                select(func.coalesce(func.sum(CustoLLMDB.custo_usd), 0.0)).where(
-                    CustoLLMDB.criado_em >= inicio_do_mes(self.relogio())
+                select(func.coalesce(func.sum(LLMCostDB.cost_usd), 0.0)).where(
+                    LLMCostDB.created_at >= start_of_month(self.clock())
                 )
             )
         return float(total or 0.0)
 
-    def verificar_limite(self) -> None:
-        gasto = self.gasto_no_mes()
-        if gasto >= self.limite_mensal_usd:
-            raise LimiteDeCustoAtingido(gasto, self.limite_mensal_usd)
+    def check_cap(self) -> None:
+        spent = self.spent_this_month()
+        if spent >= self.monthly_cap_usd:
+            raise CostCapReached(spent, self.monthly_cap_usd)
 
-    def registrar(
+    def record(
         self,
-        operacao: str,
-        modelo: str,
+        operation: str,
+        model: str,
         usage: _Usage,
         *,
-        perfil_id: int | None = None,
-        execucao_id: int | None = None,
+        profile_id: int | None = None,
+        run_id: int | None = None,
         batch: bool = False,
     ) -> float:
-        valor = custo(modelo, usage, batch=batch)
-        with sessao(self.engine) as s:
+        amount = cost(model, usage, batch=batch)
+        with session(self.engine) as s:
             s.add(
-                CustoLLMDB(
-                    execucao_id=execucao_id,
-                    perfil_id=perfil_id,
-                    operacao=operacao,
-                    modelo=modelo,
+                LLMCostDB(
+                    run_id=run_id,
+                    profile_id=profile_id,
+                    operation=operation,
+                    model=model,
                     batch=batch,
                     input_tokens=usage.input_tokens,
                     output_tokens=usage.output_tokens,
                     cache_read_tokens=usage.cache_read_input_tokens or 0,
                     cache_write_tokens=usage.cache_creation_input_tokens or 0,
-                    custo_usd=valor,
-                    criado_em=self.relogio(),
+                    cost_usd=amount,
+                    created_at=self.clock(),
                 )
             )
-        return valor
+        return amount
 
-    def estruturado(
+    def structured(
         self,
-        formato: type[T],
+        output_format: type[T],
         *,
-        operacao: str,
-        modelo: str,
-        perfil_id: int | None = None,
-        execucao_id: int | None = None,
+        operation: str,
+        model: str,
+        profile_id: int | None = None,
+        run_id: int | None = None,
         **params: Any,
     ) -> T:
-        """Uma chamada com saída estruturada (`messages.parse`), já contabilizada.
+        """One call with structured output (`messages.parse`), with its cost recorded.
 
-        Levanta `RespostaInvalida` em recusa, truncamento ou saída ausente.
+        Raises `InvalidResponse` on refusal, truncation or missing output.
         """
-        self.verificar_limite()
-        resposta = self.anthropic.messages.parse(model=modelo, output_format=formato, **params)
-        self.registrar(
-            operacao, modelo, resposta.usage, perfil_id=perfil_id, execucao_id=execucao_id
-        )
-        u = resposta.usage
+        self.check_cap()
+        response = self.anthropic.messages.parse(model=model, output_format=output_format, **params)
+        self.record(operation, model, response.usage, profile_id=profile_id, run_id=run_id)
+        u = response.usage
         log.info(
             "%s %s: in=%d out=%d cache_read=%d cache_write=%d stop=%s",
-            operacao,
-            modelo,
+            operation,
+            model,
             u.input_tokens,
             u.output_tokens,
             u.cache_read_input_tokens or 0,
             u.cache_creation_input_tokens or 0,
-            resposta.stop_reason,
+            response.stop_reason,
         )
-        if resposta.stop_reason == "refusal":
-            raise RespostaInvalida("o modelo recusou a solicitação")
-        if resposta.stop_reason == "max_tokens":
-            raise RespostaInvalida("resposta truncada (max_tokens)")
-        saida = resposta.parsed_output
-        if saida is None:
-            raise RespostaInvalida(f"sem saída estruturada (stop_reason={resposta.stop_reason})")
-        return saida
+        if response.stop_reason == "refusal":
+            raise InvalidResponse("the model refused the request")
+        if response.stop_reason == "max_tokens":
+            raise InvalidResponse("truncated response (max_tokens)")
+        output = response.parsed_output
+        if output is None:
+            raise InvalidResponse(f"no structured output (stop_reason={response.stop_reason})")
+        return output
 
 
-def criar_cliente(engine: Engine) -> ClienteLLM:
-    """Cliente real a partir das configurações. Exige ANTHROPIC_API_KEY."""
+def make_client(engine: Engine) -> LLMClient:
+    """Real client from the settings. Requires ANTHROPIC_API_KEY."""
     import anthropic
 
     from job_finder.config import get_settings
 
     settings = get_settings()
     if settings.anthropic_api_key is None:
-        raise RuntimeError("ANTHROPIC_API_KEY não configurada (coloque no .env)")
-    return ClienteLLM(
+        raise RuntimeError("ANTHROPIC_API_KEY is not set (put it in .env)")
+    return LLMClient(
         engine,
         anthropic.Anthropic(api_key=settings.anthropic_api_key.get_secret_value()),
-        limite_mensal_usd=settings.custo_mensal_max_usd,
+        monthly_cap_usd=settings.monthly_cost_cap_usd,
     )

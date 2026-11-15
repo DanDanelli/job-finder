@@ -1,16 +1,16 @@
-"""JSearch (OpenWeb Ninja, acesso direto): vagas do Google for Jobs.
+"""JSearch (OpenWeb Ninja, direct access): Google for Jobs listings.
 
-O Google for Jobs indexa as vagas que LinkedIn, Indeed, Glassdoor, Vagas.com e outros
-publicam; o JSearch devolve esse índice por API. Cada vaga traz o site de origem
-(`job_publisher`), que aparece no digest.
+Google for Jobs indexes the jobs that LinkedIn, Indeed, Glassdoor, Vagas.com and others
+publish; JSearch serves that index through an API. Each job carries its origin site
+(`job_publisher`), which shows in the digest.
 
-API: GET https://api.openwebninja.com/jsearch/search-v2, chave no cabeçalho `x-api-key`
-(spec OpenAPI oficial, conferida em 2026-11-15). Cada página (até 10 vagas) consome uma
-requisição da quota.
+API: GET https://api.openwebninja.com/jsearch/search-v2, key in the `x-api-key` header
+(official OpenAPI spec, checked on 2026-11-15). Each page (up to 10 jobs) uses one
+request from the quota.
 
-Quota: o plano grátis é pequeno, por isso cada rodada faz só algumas buscas, em
-rodízio entre os pares (termo, país) de todos os perfis. O cursor do rodízio é o número de
-chamadas já feitas no mês, então não precisa de estado extra.
+Quota: the free plan is small, so each run makes only a few searches, rotating through
+the (term, country) pairs of every profile. The rotation cursor is the number of calls
+already made this month, so no extra state is needed.
 """
 
 import base64
@@ -24,18 +24,18 @@ from typing import Any
 import httpx
 
 from job_finder.config import Settings, get_settings
-from job_finder.connectors.base import registrar
-from job_finder.domain import Query, Salario, VagaBruta
-from job_finder.pipeline.locais import interpretar_local
+from job_finder.connectors.base import register
+from job_finder.domain import Query, RawJob, Salary, SalaryPeriod
+from job_finder.pipeline.locations import parse_location
 from job_finder.quota import Quota
 
 URL = "https://api.openwebninja.com/jsearch/search-v2"
-PERIODOS = {"YEAR": "ano", "MONTH": "mes", "HOUR": "hora"}
-# "há 22 horas", "há 1 dia", "há 2 semanas", "há 1 mês"; ou em inglês, "3 days ago".
-_IDADE = re.compile(
+PERIODS: dict[str, SalaryPeriod] = {"YEAR": "year", "MONTH": "month", "HOUR": "hour"}
+# "há 22 horas", "há 1 dia", "há 2 semanas", "há 1 mês"; or in English, "3 days ago".
+_AGE = re.compile(
     r"(\d+)\+?\s*(minuto|minute|hora|hour|dia|day|semana|week|m[eê]s|meses|month)", re.I
 )
-_UNIDADES = {
+_UNITS = {
     "minut": timedelta(minutes=1),
     "hora": timedelta(hours=1),
     "hour": timedelta(hours=1),
@@ -48,119 +48,121 @@ _UNIDADES = {
 
 
 class JSearch:
-    nome = "jsearch"
+    name = "jsearch"
 
     def __init__(
         self,
         http: httpx.Client,
         settings: Settings,
-        relogio: Callable[[], datetime] = lambda: datetime.now(UTC),
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self.http = http
         self.settings = settings
-        self.relogio = relogio
-        self.limite_diario: int | None = settings.jsearch_limite_diario
-        self.limite_mensal: int | None = settings.jsearch_limite_mensal
+        self.clock = clock
+        self.daily_limit: int | None = settings.jsearch_daily_limit
+        self.monthly_limit: int | None = settings.jsearch_monthly_limit
 
-    def combinacoes(self, queries: Sequence[Query]) -> list[tuple[str, str]]:
-        """Pares (termo, país), na ordem do rodízio. Query sem país usa os padrões."""
-        pares: list[tuple[str, str]] = []
+    def pairs(self, queries: Sequence[Query]) -> list[tuple[str, str]]:
+        """(term, country) pairs, in rotation order. A query with no country uses the
+        defaults."""
+        pairs: list[tuple[str, str]] = []
         for q in queries:
-            for pais in q.paises or self.settings.jsearch_paises:
-                par = (q.termo, pais.lower())
-                if par not in pares:
-                    pares.append(par)
-        return pares
+            for country in q.countries or self.settings.jsearch_countries:
+                pair = (q.term, country.lower())
+                if pair not in pairs:
+                    pairs.append(pair)
+        return pairs
 
-    def buscar(self, queries: Sequence[Query], quota: Quota) -> list[VagaBruta]:
+    def search(self, queries: Sequence[Query], quota: Quota) -> list[RawJob]:
         if self.settings.jsearch_api_key is None:
-            raise RuntimeError("JOBFINDER_JSEARCH_API_KEY não configurada")
-        pares = self.combinacoes(queries)
-        if not pares:
+            raise RuntimeError("JOBFINDER_JSEARCH_API_KEY is not set")
+        pairs = self.pairs(queries)
+        if not pairs:
             return []
-        inicio = quota.usadas_no_mes()
-        n = min(self.settings.jsearch_buscas_por_rodada, len(pares))
-        vagas: dict[str, VagaBruta] = {}
+        start = quota.used_this_month()
+        n = min(self.settings.jsearch_searches_per_run, len(pairs))
+        jobs: dict[str, RawJob] = {}
         for i in range(n):
-            termo, pais = pares[(inicio + i) % len(pares)]
-            quota.consumir()
-            for job in self._buscar(termo, pais):
-                vaga = self._converter(job)
-                if vaga is not None:
-                    vagas.setdefault(vaga.id_fonte, vaga)
-        return list(vagas.values())
+            term, country = pairs[(start + i) % len(pairs)]
+            quota.consume()
+            for item in self._search(term, country):
+                job = self._convert(item)
+                if job is not None:
+                    jobs.setdefault(job.source_id, job)
+        return list(jobs.values())
 
-    def _buscar(self, termo: str, pais: str) -> list[dict[str, Any]]:
+    def _search(self, term: str, country: str) -> list[dict[str, Any]]:
         assert self.settings.jsearch_api_key is not None
-        resposta = self.http.get(
+        response = self.http.get(
             URL,
             params={
-                "query": termo,
-                "country": pais,
+                "query": term,
+                "country": country,
                 "num_pages": 1,
-                "date_posted": self.settings.jsearch_publicadas_em,
+                "date_posted": self.settings.jsearch_date_posted,
             },
             headers={"x-api-key": self.settings.jsearch_api_key.get_secret_value()},
         )
-        resposta.raise_for_status()
-        corpo = resposta.json()
-        if corpo.get("status") not in (None, "OK"):
-            raise RuntimeError(f"JSearch: {corpo.get('status')}: {corpo.get('error')}")
-        return list((corpo.get("data") or {}).get("jobs") or [])
+        response.raise_for_status()
+        body = response.json()
+        if body.get("status") not in (None, "OK"):
+            raise RuntimeError(f"JSearch: {body.get('status')}: {body.get('error')}")
+        return list((body.get("data") or {}).get("jobs") or [])
 
-    def _converter(self, job: dict[str, Any]) -> VagaBruta | None:
+    def _convert(self, job: dict[str, Any]) -> RawJob | None:
         url = job.get("job_apply_link") or job.get("job_google_link")
         if not job.get("job_id") or not job.get("job_title") or not url:
             return None
-        direto = next(
+        direct = next(
             (o.get("apply_link") for o in job.get("apply_options") or [] if o.get("is_direct")),
             None,
         )
-        local = job.get("job_location") or ", ".join(
+        location = job.get("job_location") or ", ".join(
             p for p in (job.get("job_city"), job.get("job_state")) if p
         )
-        # "Contagem - MG" não diz o país (e MG parece Madagascar); o job_country diz.
-        pais = job.get("job_country")
-        if pais and interpretar_local(local) != [pais]:
-            local = f"{local}, {pais}" if local else pais
-        return VagaBruta(
-            fonte=self.nome,
-            id_fonte=_id_estavel(str(job["job_id"])),
-            titulo=job["job_title"],
-            empresa=job.get("employer_name") or None,
-            local=local or None,
-            descricao=job.get("job_description") or None,
+        # "Contagem - MG" does not say the country (and MG looks like Madagascar);
+        # job_country does.
+        country = job.get("job_country")
+        if country and parse_location(location) != [country]:
+            location = f"{location}, {country}" if location else country
+        return RawJob(
+            source=self.name,
+            source_id=_stable_id(str(job["job_id"])),
+            title=job["job_title"],
+            company=job.get("employer_name") or None,
+            location=location or None,
+            description=job.get("job_description") or None,
             url=url,
-            url_candidatura=direto,
-            publicada_em=self._publicada(job),
-            modalidade="remote" if job.get("job_is_remote") else None,
-            tipo_contrato=job.get("job_employment_type") or None,
-            salario=_salario(job),
-            salario_texto=job.get("job_salary_string") or None,
-            dados_brutos={
+            apply_url=direct,
+            posted_at=self._posted_at(job),
+            work_mode="remote" if job.get("job_is_remote") else None,
+            contract_type=job.get("job_employment_type") or None,
+            salary=_salary(job),
+            salary_text=job.get("job_salary_string") or None,
+            raw_data={
                 "publisher": job.get("job_publisher"),
                 "google_link": job.get("job_google_link"),
             },
         )
 
-    def _publicada(self, job: dict[str, Any]) -> datetime | None:
+    def _posted_at(self, job: dict[str, Any]) -> datetime | None:
         if iso := job.get("job_posted_at_datetime_utc"):
             return datetime.fromisoformat(iso)
         if ts := job.get("job_posted_at_timestamp"):
             return datetime.fromtimestamp(ts, UTC)
-        m = _IDADE.search(job.get("job_posted_at") or "")
+        m = _AGE.search(job.get("job_posted_at") or "")
         if not m:
             return None
-        unidade = next(d for k, d in _UNIDADES.items() if m.group(2).lower().startswith(k))
-        return self.relogio() - int(m.group(1)) * unidade
+        unit = next(d for k, d in _UNITS.items() if m.group(2).lower().startswith(k))
+        return self.clock() - int(m.group(1)) * unit
 
 
-def _id_estavel(job_id: str) -> str:
-    """O job_id é base64 de "<docid do Google>:<token da busca>"; o token muda a cada
-    busca, então a mesma vaga voltaria como nova. Usa só o docid."""
+def _stable_id(job_id: str) -> str:
+    """job_id is base64 of "<Google docid>:<search token>"; the token changes on every
+    search, so the same job would come back as new. Uses only the docid."""
     try:
-        decodificado = base64.urlsafe_b64decode(job_id + "=" * (-len(job_id) % 4))
-        docid = decodificado.split(b":", 1)[0].decode("ascii")
+        decoded = base64.urlsafe_b64decode(job_id + "=" * (-len(job_id) % 4))
+        docid = decoded.split(b":", 1)[0].decode("ascii")
     except (binascii.Error, UnicodeDecodeError, ValueError):
         docid = ""
     if docid and len(docid) <= 64:
@@ -168,18 +170,18 @@ def _id_estavel(job_id: str) -> str:
     return hashlib.sha256(job_id.encode()).hexdigest()[:32]
 
 
-def _salario(job: dict[str, Any]) -> Salario | None:
-    minimo, maximo = job.get("job_min_salary"), job.get("job_max_salary")
-    if minimo is None and maximo is None:
+def _salary(job: dict[str, Any]) -> Salary | None:
+    minimum, maximum = job.get("job_min_salary"), job.get("job_max_salary")
+    if minimum is None and maximum is None:
         return None
-    return Salario(
-        minimo=minimo,
-        maximo=maximo,
-        moeda=job.get("job_salary_currency"),
-        periodo=PERIODOS.get(str(job.get("job_salary_period") or "").upper()),
+    return Salary(
+        minimum=minimum,
+        maximum=maximum,
+        currency=job.get("job_salary_currency"),
+        period=PERIODS.get(str(job.get("job_salary_period") or "").upper()),
     )
 
 
-@registrar("jsearch")
-def _fabrica(http: httpx.Client) -> JSearch:
+@register("jsearch")
+def _factory(http: httpx.Client) -> JSearch:
     return JSearch(http, get_settings())

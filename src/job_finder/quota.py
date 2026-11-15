@@ -1,7 +1,7 @@
-"""Controle de quota por conector: limite diário e mensal (mês do calendário).
+"""Per-connector quota: daily and monthly (calendar month) limits.
 
-Cada consumo é gravado na hora, numa transação própria: a chamada HTTP aconteceu
-mesmo que a rodada falhe depois ou seja um dry-run com rollback.
+Each use is recorded right away, in its own transaction: the HTTP call happened even if
+the run fails later or is a dry run that rolls back.
 """
 
 from datetime import date
@@ -9,74 +9,73 @@ from datetime import date
 from sqlalchemy import Engine, func, select
 from sqlalchemy.dialects.sqlite import insert
 
-from job_finder.db.models import UsoQuotaDB
-from job_finder.db.session import sessao
+from job_finder.db.models import QuotaUsageDB
+from job_finder.db.session import session
 
 
-class QuotaEsgotada(Exception):
+class QuotaExhausted(Exception):
     def __init__(
-        self, conector: str, limite_diario: int | None, limite_mensal: int | None = None
+        self, connector: str, daily_limit: int | None, monthly_limit: int | None = None
     ) -> None:
-        limites = []
-        if limite_diario is not None:
-            limites.append(f"{limite_diario}/dia")
-        if limite_mensal is not None:
-            limites.append(f"{limite_mensal}/mês")
-        super().__init__(f"quota de {conector} esgotada ({', '.join(limites)})")
-        self.conector = conector
+        limits = []
+        if daily_limit is not None:
+            limits.append(f"{daily_limit}/day")
+        if monthly_limit is not None:
+            limits.append(f"{monthly_limit}/month")
+        super().__init__(f"{connector} quota exhausted ({', '.join(limits)})")
+        self.connector = connector
 
 
 class Quota:
     def __init__(
         self,
         engine: Engine,
-        conector: str,
-        limite_diario: int | None,
-        hoje: date,
-        limite_mensal: int | None = None,
+        connector: str,
+        daily_limit: int | None,
+        today: date,
+        monthly_limit: int | None = None,
     ):
         self.engine = engine
-        self.conector = conector
-        self.limite_diario = limite_diario
-        self.limite_mensal = limite_mensal
-        self.hoje = hoje
+        self.connector = connector
+        self.daily_limit = daily_limit
+        self.monthly_limit = monthly_limit
+        self.today = today
 
-    def usadas_no_mes(self) -> int:
-        with sessao(self.engine) as s:
-            consulta = select(func.coalesce(func.sum(UsoQuotaDB.chamadas), 0)).where(
-                UsoQuotaDB.conector == self.conector,
-                UsoQuotaDB.dia >= self.hoje.replace(day=1),
-                UsoQuotaDB.dia <= self.hoje,
+    def used_this_month(self) -> int:
+        with session(self.engine) as s:
+            query = select(func.coalesce(func.sum(QuotaUsageDB.calls), 0)).where(
+                QuotaUsageDB.connector == self.connector,
+                QuotaUsageDB.day >= self.today.replace(day=1),
+                QuotaUsageDB.day <= self.today,
             )
-            return int(s.execute(consulta).scalar_one())
+            return int(s.execute(query).scalar_one())
 
-    def usadas_hoje(self) -> int:
-        with sessao(self.engine) as s:
-            consulta = select(func.coalesce(func.sum(UsoQuotaDB.chamadas), 0)).where(
-                UsoQuotaDB.conector == self.conector, UsoQuotaDB.dia == self.hoje
+    def used_today(self) -> int:
+        with session(self.engine) as s:
+            query = select(func.coalesce(func.sum(QuotaUsageDB.calls), 0)).where(
+                QuotaUsageDB.connector == self.connector, QuotaUsageDB.day == self.today
             )
-            return int(s.execute(consulta).scalar_one())
+            return int(s.execute(query).scalar_one())
 
-    def disponivel(self) -> int | None:
-        """Chamadas restantes hoje, considerando o limite diário e o mensal; None se não há
-        limite."""
-        restantes = []
-        if self.limite_diario is not None:
-            restantes.append(self.limite_diario - self.usadas_hoje())
-        if self.limite_mensal is not None:
-            restantes.append(self.limite_mensal - self.usadas_no_mes())
-        return max(min(restantes), 0) if restantes else None
+    def available(self) -> int | None:
+        """Calls left today under both the daily and the monthly limit; None if unlimited."""
+        remaining = []
+        if self.daily_limit is not None:
+            remaining.append(self.daily_limit - self.used_today())
+        if self.monthly_limit is not None:
+            remaining.append(self.monthly_limit - self.used_this_month())
+        return max(min(remaining), 0) if remaining else None
 
-    def consumir(self, n: int = 1) -> None:
-        """Registra `n` chamadas; levanta QuotaEsgotada se não houver saldo."""
-        restante = self.disponivel()
-        if restante is not None and restante < n:
-            raise QuotaEsgotada(self.conector, self.limite_diario, self.limite_mensal)
-        with sessao(self.engine) as s:
-            stmt = insert(UsoQuotaDB).values(conector=self.conector, dia=self.hoje, chamadas=n)
+    def consume(self, n: int = 1) -> None:
+        """Records `n` calls; raises QuotaExhausted when there is not enough left."""
+        left = self.available()
+        if left is not None and left < n:
+            raise QuotaExhausted(self.connector, self.daily_limit, self.monthly_limit)
+        with session(self.engine) as s:
+            stmt = insert(QuotaUsageDB).values(connector=self.connector, day=self.today, calls=n)
             s.execute(
                 stmt.on_conflict_do_update(
-                    index_elements=["conector", "dia"],
-                    set_={"chamadas": UsoQuotaDB.chamadas + n},
+                    index_elements=["connector", "day"],
+                    set_={"calls": QuotaUsageDB.calls + n},
                 )
             )

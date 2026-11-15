@@ -1,7 +1,7 @@
-"""Digest do Telegram: escolhe as vagas novas de um perfil, formata e envia.
+"""Telegram digest: picks a profile's new jobs, formats them and sends them.
 
-O envio passa por um `Enviador` (o bot real ou um dublê nos testes). Uma vaga é marcada
-como notificada só depois que a mensagem dela sai, para uma falha de rede não perder vagas.
+Sending goes through a `Sender` (the real bot or a fake in tests). A job is marked as
+notified only after its message goes out, so a network failure does not lose jobs.
 """
 
 import asyncio
@@ -14,225 +14,238 @@ from typing import Protocol
 
 from sqlalchemy import Engine, select
 
-from job_finder.db.models import MatchDB, PerfilDB, VagaFonteDB
-from job_finder.db.session import sessao
-from job_finder.domain import StatusMatch
+from job_finder.db.models import JobSourceDB, MatchDB, ProfileDB
+from job_finder.db.session import session
+from job_finder.domain import MatchStatus
+from job_finder.i18n import t
 
 log = logging.getLogger(__name__)
 
-# Nome de exibição das fontes. Os termos do Remotive pedem para citá-lo como fonte.
-NOMES_FONTES = {"remotive": "Remotive"}
-MODALIDADES = {"remoto": "Remoto", "hibrido": "Híbrido", "presencial": "Presencial"}
-PERIODOS = {"ano": "ano", "mes": "mês", "hora": "hora"}
+# Display names of the sources. Remotive's terms ask to credit it as the source.
+SOURCE_NAMES = {"remotive": "Remotive"}
+WORK_MODES = {"remote", "hybrid", "onsite"}
+PERIODS = {"year", "month", "hour"}
 
 
 @dataclass(frozen=True)
-class Botao:
-    texto: str
+class Button:
+    text: str
     callback: str | None = None
     url: str | None = None
 
 
-class Enviador(Protocol):
-    async def enviar(
-        self, chat_id: int, texto: str, botoes: Sequence[Botao] | None = None
+class Sender(Protocol):
+    async def send(
+        self, chat_id: int, text: str, buttons: Sequence[Button] | None = None
     ) -> None: ...
 
 
 @dataclass
-class ItemDigest:
+class DigestItem:
     match_id: int
     score: int
-    titulo: str
-    empresa: str | None
-    local: str
-    salario: str | None
-    pontos_fortes: list[str]
+    title: str
+    company: str | None
+    work_mode: str
+    location_text: str | None
+    salary_range: str | None  # e.g. "BRL 20k-25k"
+    salary_period: str | None
+    strengths: list[str]
     gaps: list[str]
     dealbreakers: list[str]
-    resumo: str | None
+    summary: str | None
     url: str
-    fontes: list[str]
+    sources: list[str]
 
 
 @dataclass
 class Digest:
     chat_id: int | None
-    novas: int
-    score_minimo: int
-    itens: list[ItemDigest] = field(default_factory=list)
-    abaixo_do_minimo: list[int] = field(default_factory=list)  # ids: marcar sem enviar
-    acima_do_minimo: int = 0
+    new: int
+    min_score: int
+    items: list[DigestItem] = field(default_factory=list)
+    below_minimum: list[int] = field(default_factory=list)  # ids: mark without sending
+    above_minimum: int = 0
 
 
-def _salario(m: MatchDB) -> str | None:
-    v = m.vaga
-    if v.salario_min is None or v.salario_max is None:
+def _salary_range(m: MatchDB) -> str | None:
+    j = m.job
+    if j.salary_min is None or j.salary_max is None:
         return None
 
     def k(x: float) -> str:
         return f"{x / 1000:.0f}k" if x >= 10_000 else f"{x:,.0f}"
 
-    faixa = (
-        k(v.salario_min)
-        if v.salario_min == v.salario_max
-        else f"{k(v.salario_min)}-{k(v.salario_max)}"
+    span = (
+        k(j.salary_min) if j.salary_min == j.salary_max else f"{k(j.salary_min)}-{k(j.salary_max)}"
     )
-    periodo = f"/{PERIODOS[v.salario_periodo]}" if v.salario_periodo in PERIODOS else ""
-    return f"{v.salario_moeda or ''} {faixa}{periodo}".strip()
+    return f"{j.salary_currency or ''} {span}".strip()
 
 
-def _local(m: MatchDB) -> str:
-    v = m.vaga
-    modalidade = MODALIDADES.get(v.modalidade)
-    partes = [p for p in (modalidade, v.local_texto) if p]
-    return " · ".join(partes) or "local não informado"
-
-
-def _nome_fonte(f: VagaFonteDB) -> str | None:
-    if f.fonte == "manual":
-        return None  # avaliação avulsa: a pessoa já sabe de onde veio
-    if f.fonte == "jsearch":
-        # O site de origem (LinkedIn, Indeed...) interessa mais que o agregador.
-        publisher = (f.dados_brutos or {}).get("publisher")
+def _source_name(source: JobSourceDB) -> str | None:
+    if source.source == "manual":
+        return None  # ad-hoc evaluation: the person knows where it came from
+    if source.source == "jsearch":
+        # The origin site (LinkedIn, Indeed...) matters more than the aggregator.
+        publisher = (source.raw_data or {}).get("publisher")
         return f"{publisher} (Google for Jobs)" if publisher else "Google for Jobs"
-    return NOMES_FONTES.get(f.fonte, f.fonte)
+    return SOURCE_NAMES.get(source.source, source.source)
 
 
-def _item(m: MatchDB) -> ItemDigest:
-    return ItemDigest(
+def digest_item(m: MatchDB) -> DigestItem:
+    return DigestItem(
         match_id=m.id,
         score=m.score or 0,
-        titulo=m.vaga.titulo,
-        empresa=m.vaga.empresa,
-        local=_local(m),
-        salario=_salario(m),
-        pontos_fortes=list(m.pontos_fortes or []),
+        title=m.job.title,
+        company=m.job.company,
+        work_mode=m.job.work_mode,
+        location_text=m.job.location_text,
+        salary_range=_salary_range(m),
+        salary_period=m.job.salary_period,
+        strengths=list(m.strengths or []),
         gaps=list(m.gaps or []),
         dealbreakers=list(m.dealbreakers or []),
-        resumo=m.resumo,
-        url=m.vaga.url,
-        fontes=sorted({n for f in m.vaga.fontes if (n := _nome_fonte(f))}),
+        summary=m.summary,
+        url=m.job.url,
+        sources=sorted({n for s in m.job.sources if (n := _source_name(s))}),
     )
 
 
-def montar_digest(engine: Engine, perfil_id: int, *, score_minimo: int, maximo: int) -> Digest:
-    """Vagas com nota ainda não notificadas: as melhores acima do mínimo, até `maximo`.
+def build_digest(engine: Engine, profile_id: int, *, min_score: int, maximum: int) -> Digest:
+    """Scored jobs not yet notified: the best ones above the minimum, up to `maximum`.
 
-    As que passam do máximo ficam para o próximo digest; as abaixo do mínimo são só
-    contadas no cabeçalho e marcadas como notificadas.
+    Jobs beyond the maximum wait for the next digest; the ones below the minimum are only
+    counted in the header and marked as notified.
     """
-    with sessao(engine, commit=False) as s:
-        perfil = s.get_one(PerfilDB, perfil_id)
+    with session(engine, commit=False) as s:
+        profile = s.get_one(ProfileDB, profile_id)
         matches = list(
             s.scalars(
                 select(MatchDB)
                 .where(
-                    MatchDB.perfil_id == perfil_id,
-                    MatchDB.status == StatusMatch.NOVA,
-                    MatchDB.notificado_em.is_(None),
+                    MatchDB.profile_id == profile_id,
+                    MatchDB.status == MatchStatus.NEW,
+                    MatchDB.notified_at.is_(None),
                 )
                 .order_by(MatchDB.score.desc(), MatchDB.id)
             )
         )
-        acima = [m for m in matches if (m.score or 0) >= score_minimo]
+        above = [m for m in matches if (m.score or 0) >= min_score]
         return Digest(
-            chat_id=perfil.telegram_chat_id,
-            novas=len(matches),
-            score_minimo=score_minimo,
-            itens=[_item(m) for m in acima[:maximo]],
-            abaixo_do_minimo=[m.id for m in matches if (m.score or 0) < score_minimo],
-            acima_do_minimo=len(acima),
+            chat_id=profile.telegram_chat_id,
+            new=len(matches),
+            min_score=min_score,
+            items=[digest_item(m) for m in above[:maximum]],
+            below_minimum=[m.id for m in matches if (m.score or 0) < min_score],
+            above_minimum=len(above),
         )
 
 
-# --- formatação (HTML do Telegram) --------------------------------------------
+# --- formatting (Telegram HTML) -----------------------------------------------
 
 
-def _e(texto: str) -> str:
-    return html.escape(texto, quote=False)
+def esc(text: str) -> str:
+    return html.escape(text, quote=False)
 
 
-def formatar_cabecalho(d: Digest) -> str:
-    if d.novas == 0:
-        return "Nenhuma vaga nova desde o último digest."
-    texto = f"<b>{d.novas} vagas novas</b> · {d.acima_do_minimo} com fit ≥ {d.score_minimo}"
-    if d.acima_do_minimo > len(d.itens):
-        texto += f"\nMostrando as {len(d.itens)} melhores; o resto vem no próximo digest."
-    return texto
+def format_header(d: Digest, lang: str) -> str:
+    if d.new == 0:
+        return t(lang, "digest.none")
+    text = t(lang, "digest.header", new=d.new, above=d.above_minimum, min_score=d.min_score)
+    if d.above_minimum > len(d.items):
+        text += "\n" + t(lang, "digest.more", shown=len(d.items))
+    return text
 
 
-def formatar_vaga(item: ItemDigest) -> str:
-    linhas = [f"<b>{item.score}</b> · <b>{_e(item.titulo)}</b>"]
-    detalhe = " · ".join(_e(p) for p in (item.empresa, item.local, item.salario) if p)
-    if detalhe:
-        linhas.append(detalhe)
-    if item.pontos_fortes:
-        linhas.append("✅ " + "; ".join(_e(p) for p in item.pontos_fortes))
+def _location(item: DigestItem, lang: str) -> str:
+    mode = t(lang, f"work_mode.{item.work_mode}") if item.work_mode in WORK_MODES else None
+    parts = [p for p in (mode, item.location_text) if p]
+    return " · ".join(parts) or t(lang, "location.unknown")
+
+
+def _salary(item: DigestItem, lang: str) -> str | None:
+    if item.salary_range is None:
+        return None
+    if item.salary_period in PERIODS:
+        return f"{item.salary_range}/{t(lang, f'period.{item.salary_period}')}"
+    return item.salary_range
+
+
+def format_job(item: DigestItem, lang: str) -> str:
+    lines = [f"<b>{item.score}</b> · <b>{esc(item.title)}</b>"]
+    details = (item.company, _location(item, lang), _salary(item, lang))
+    detail = " · ".join(esc(p) for p in details if p)
+    if detail:
+        lines.append(detail)
+    if item.strengths:
+        lines.append("✅ " + "; ".join(esc(s) for s in item.strengths))
     if item.gaps:
-        linhas.append("⚠️ " + "; ".join(_e(g) for g in item.gaps))
+        lines.append("⚠️ " + "; ".join(esc(g) for g in item.gaps))
     if item.dealbreakers:
-        linhas.append("⛔ " + "; ".join(_e(d) for d in item.dealbreakers))
-    if item.resumo:
-        linhas.append(f"<i>{_e(item.resumo)}</i>")
-    if item.fontes:
-        linhas.append(f"via {_e(', '.join(item.fontes))}")
-    return "\n".join(linhas)
+        lines.append("⛔ " + "; ".join(esc(d) for d in item.dealbreakers))
+    if item.summary:
+        lines.append(f"<i>{esc(item.summary)}</i>")
+    if item.sources:
+        lines.append(f"via {esc(', '.join(item.sources))}")
+    return "\n".join(lines)
 
 
-def botoes_da_vaga(match_id: int, url: str, status: str | None = None) -> list[Botao]:
-    salvar = "✅ Salva" if status == StatusMatch.SALVA else "👍 Salvar"
-    descartar = "🗑 Descartada" if status == StatusMatch.DESCARTADA else "👎 Descartar"
+def job_buttons(match_id: int, url: str, lang: str, status: str | None = None) -> list[Button]:
+    save = t(lang, "button.saved" if status == MatchStatus.SAVED else "button.save")
+    dismiss = t(lang, "button.dismissed" if status == MatchStatus.DISMISSED else "button.dismiss")
     return [
-        Botao(salvar, callback=f"fb:s:{match_id}"),
-        Botao(descartar, callback=f"fb:d:{match_id}"),
-        Botao("🔗 Abrir", url=url),
+        Button(save, callback=f"fb:s:{match_id}"),
+        Button(dismiss, callback=f"fb:d:{match_id}"),
+        Button(t(lang, "button.open"), url=url),
     ]
 
 
-def formatar_avisos(avisos: Sequence[str]) -> str:
-    return "<b>Avisos</b>\n" + "\n".join(f"• {_e(a)}" for a in avisos)
+def format_warnings(warnings: Sequence[str], lang: str) -> str:
+    return t(lang, "digest.warnings") + "\n" + "\n".join(f"• {esc(w)}" for w in warnings)
 
 
-# --- envio --------------------------------------------------------------------
+# --- sending ------------------------------------------------------------------
 
 
-def marcar_notificados(engine: Engine, ids: Sequence[int], quando: datetime) -> None:
+def mark_notified(engine: Engine, ids: Sequence[int], when: datetime) -> None:
     if not ids:
         return
-    with sessao(engine) as s:
+    with session(engine) as s:
         for m in s.scalars(select(MatchDB).where(MatchDB.id.in_(ids))):
-            m.notificado_em = quando
+            m.notified_at = when
 
 
-async def enviar_digest(
+async def send_digest(
     engine: Engine,
-    enviador: Enviador,
-    perfil_id: int,
+    sender: Sender,
+    profile_id: int,
     *,
-    score_minimo: int,
-    maximo: int,
-    avisos: Sequence[str] = (),
-    pausa_s: float = 0.4,  # o Telegram limita ~1 mensagem/s por chat
+    min_score: int,
+    maximum: int,
+    language: str,
+    warnings: Sequence[str] = (),
+    pause_s: float = 0.4,  # Telegram allows ~1 message/s per chat
 ) -> int:
-    """Envia o digest do perfil. Devolve quantas vagas foram enviadas."""
+    """Sends the profile's digest. Returns how many jobs were sent."""
     d = await asyncio.to_thread(
-        montar_digest, engine, perfil_id, score_minimo=score_minimo, maximo=maximo
+        build_digest, engine, profile_id, min_score=min_score, maximum=maximum
     )
     if d.chat_id is None:
-        log.info("perfil %s sem telegram_chat_id; digest não enviado", perfil_id)
+        log.info("profile %s has no telegram_chat_id; digest not sent", profile_id)
         return 0
 
-    await enviador.enviar(d.chat_id, formatar_cabecalho(d))
-    enviadas = 0
-    for item in d.itens:
-        await asyncio.sleep(pausa_s)
-        await enviador.enviar(
-            d.chat_id, formatar_vaga(item), botoes_da_vaga(item.match_id, item.url)
+    await sender.send(d.chat_id, format_header(d, language))
+    sent = 0
+    for item in d.items:
+        await asyncio.sleep(pause_s)
+        await sender.send(
+            d.chat_id,
+            format_job(item, language),
+            job_buttons(item.match_id, item.url, language),
         )
-        await asyncio.to_thread(marcar_notificados, engine, [item.match_id], datetime.now(UTC))
-        enviadas += 1
-    await asyncio.to_thread(marcar_notificados, engine, d.abaixo_do_minimo, datetime.now(UTC))
-    if avisos:
-        await enviador.enviar(d.chat_id, formatar_avisos(avisos))
-    return enviadas
+        await asyncio.to_thread(mark_notified, engine, [item.match_id], datetime.now(UTC))
+        sent += 1
+    await asyncio.to_thread(mark_notified, engine, d.below_minimum, datetime.now(UTC))
+    if warnings:
+        await sender.send(d.chat_id, format_warnings(warnings, language))
+    return sent

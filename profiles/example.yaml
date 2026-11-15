@@ -1,0 +1,38 @@
+# Example profile. Copy it to profiles/<name>.yaml (ignored by git) and adjust it.
+# `job-finder profile import <cv.pdf> -p <name>` fills `data` (and suggests queries) from a CV.
+name: example
+telegram_chat_id: null   # send /start to the bot to get it
+
+queries:
+  - term: Cloud Architect
+    countries: []          # empty = worldwide
+  - term: DevOps Lead
+    countries: [DE, NL, PT]
+
+filters:
+  countries: [PT, ES, DE, NL, IE, GB]   # accepts onsite/hybrid jobs in these countries
+  remote_from: [PT]                     # remote jobs must accept people living in PT
+  work_modes: [remote, hybrid]
+  contract_types: [full_time, contract]
+  min_salary: {minimum: 50000, currency: EUR, period: year}
+  # Optional, per contract type (overrides min_salary for that type):
+  # min_salary_by_contract:
+  #   full_time: {minimum: 20000, currency: BRL, period: month}
+  #   contract: {minimum: 30000, currency: BRL, period: month}
+  blocked_companies: []
+  blocked_keywords: [intern, internship]
+  max_age_days: 14
+
+preferences: >
+  I prefer product companies over consultancies. Open to relocating within Europe.
+
+data:
+  summary: Cloud architect focused on AWS and platform engineering.
+  roles: [Cloud Architect, DevOps Engineer]
+  seniority: senior
+  skills:
+    - {name: AWS, weight: 5}
+    - {name: Terraform, weight: 4}
+  languages:
+    - {code: pt, level: native}
+    - {code: en, level: fluent}

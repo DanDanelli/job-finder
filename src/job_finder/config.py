@@ -1,11 +1,14 @@
-"""Configuração da aplicação, lida de variáveis de ambiente e do arquivo `.env`."""
+"""Application settings, read from environment variables and the `.env` file."""
 
 from datetime import time
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+Language = Literal["en", "pt-BR"]
 
 
 class Settings(BaseSettings):
@@ -21,42 +24,44 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     host: str = "0.0.0.0"
     port: int = 8000
-    # Conectores usados nas rodadas, ex: JOBFINDER_CONECTORES='["remotive"]'
-    conectores: list[str] = ["remotive"]
+    # Language of the bot's messages and of the text Claude writes (summaries, strengths).
+    language: Language = "en"
+    # Connectors used in runs, e.g. JOBFINDER_CONNECTORS='["remotive"]'
+    connectors: list[str] = ["remotive"]
 
-    # Claude API. A chave usa o nome padrão do SDK, sem o prefixo JOBFINDER_.
+    # Claude API. The key uses the SDK's standard name, without the JOBFINDER_ prefix.
     anthropic_api_key: SecretStr | None = Field(
         default=None,
         validation_alias=AliasChoices("ANTHROPIC_API_KEY", "JOBFINDER_ANTHROPIC_API_KEY"),
     )
-    modelo_perfil: str = "claude-opus-5-5"
-    modelo_scoring: str = "claude-haiku-5-5"
-    # Teto de gasto com o Claude no mês (UTC). Ao atingir, as chamadas param.
-    custo_mensal_max_usd: float = Field(default=5.0, ge=0)
-    # Quantas vagas pendentes, por perfil e rodada, vão para o LLM após o BM25.
+    profile_model: str = "claude-opus-5-5"
+    scoring_model: str = "claude-haiku-5-5"
+    # Monthly spend cap for Claude (UTC month). Once reached, calls stop.
+    monthly_cost_cap_usd: float = Field(default=5.0, ge=0)
+    # How many pending jobs, per profile and run, go to the LLM after BM25.
     prerank_top_n: int = Field(default=30, ge=1)
 
-    # Telegram: token do @BotFather. Sem token, o bot não sobe (as rodadas seguem).
+    # Telegram: token from @BotFather. Without a token the bot does not start (runs go on).
     telegram_bot_token: SecretStr | None = None
-    # Rodadas agendadas, no fuso `timezone`, ex: JOBFINDER_HORARIOS='["08:00","18:00"]'
-    agendamento_ativo: bool = True
-    horarios: list[time] = [time(8), time(18)]
-    # Digest: vagas com score >= mínimo, no máximo N por envio (o resto fica para o próximo).
-    digest_score_minimo: int = Field(default=60, ge=0, le=100)
-    digest_max_vagas: int = Field(default=10, ge=1)
+    # Scheduled runs, in `timezone`, e.g. JOBFINDER_RUN_TIMES='["08:00","18:00"]'
+    schedule_enabled: bool = True
+    run_times: list[time] = [time(8), time(18)]
+    # Digest: jobs with score >= minimum, at most N per message (the rest waits for the next).
+    digest_min_score: int = Field(default=60, ge=0, le=100)
+    digest_max_jobs: int = Field(default=10, ge=1)
 
-    # JSearch (Google for Jobs), chave de app.openwebninja.com.
-    # Ative com JOBFINDER_CONECTORES='["remotive","jsearch"]'.
+    # JSearch (Google for Jobs), key from app.openwebninja.com.
+    # Enable with JOBFINDER_CONNECTORS='["remotive","jsearch"]'.
     jsearch_api_key: SecretStr | None = None
-    jsearch_paises: list[str] = ["br"]  # para queries sem país
-    jsearch_buscas_por_rodada: int = Field(default=3, ge=1)
-    jsearch_limite_diario: int | None = 6
-    jsearch_limite_mensal: int | None = 190  # plano grátis: ~200/mês, com folga
-    jsearch_publicadas_em: str = "3days"  # all, today, 3days, week, month
+    jsearch_countries: list[str] = ["br"]  # for queries with no country
+    jsearch_searches_per_run: int = Field(default=3, ge=1)
+    jsearch_daily_limit: int | None = 6
+    jsearch_monthly_limit: int | None = 190  # free plan: ~200/month, with some slack
+    jsearch_date_posted: str = "3days"  # all, today, 3days, week, month
 
     @property
     def resolved_database_url(self) -> str:
-        """URL do banco; por padrão um SQLite dentro de `data_dir`."""
+        """Database URL; by default a SQLite file inside `data_dir`."""
         if self.database_url:
             return self.database_url
         return f"sqlite:///{self.data_dir / 'job_finder.db'}"

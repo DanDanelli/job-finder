@@ -1,67 +1,67 @@
-"""Pré-ranqueamento BM25: ordena as vagas pendentes por aderência textual ao perfil.
+"""BM25 pre-ranking: sorts pending jobs by textual match with the profile.
 
-Serve só para escolher quais vagas vão para o LLM em cada rodada (as top N); o score que
-o usuário vê é o do LLM. Implementação própria para não puxar numpy para o Pi.
+It only picks which jobs go to the LLM in each run (the top N); the score the user sees
+is the LLM's. Hand-rolled so the Pi does not need numpy.
 """
 
 import math
 from collections import Counter
 from collections.abc import Sequence
 
-from job_finder.domain import Perfil, Vaga
-from job_finder.texto import chave
+from job_finder.domain import Job, Profile
+from job_finder.text import key
 
 K1 = 1.5
 B = 0.75
-PESO_TITULO = 3  # o título repete para pesar mais que a descrição
+TITLE_WEIGHT = 3  # the title is repeated so it weighs more than the description
 
 
-def tokens(texto: str | None) -> list[str]:
-    return [t for t in chave(texto or "").split() if len(t) > 1]
+def tokens(text: str | None) -> list[str]:
+    return [t for t in key(text or "").split() if len(t) > 1]
 
 
-def consulta_do_perfil(perfil: Perfil) -> list[str]:
-    d = perfil.dados
-    termos: list[str] = []
-    for cargo in d.cargos:
-        termos += tokens(cargo) * 2
+def profile_query(profile: Profile) -> list[str]:
+    d = profile.data
+    terms: list[str] = []
+    for role in d.roles:
+        terms += tokens(role) * 2
     for skill in d.skills:
-        termos += tokens(skill.nome) * skill.peso
-    for q in perfil.queries:
-        if q.ativa:
-            termos += tokens(q.termo) * 2
-    for extra in (*d.certificacoes, *d.setores):
-        termos += tokens(extra)
-    return termos
+        terms += tokens(skill.name) * skill.weight
+    for q in profile.queries:
+        if q.active:
+            terms += tokens(q.term) * 2
+    for extra in (*d.certifications, *d.industries):
+        terms += tokens(extra)
+    return terms
 
 
-def documento_da_vaga(vaga: Vaga) -> list[str]:
-    return tokens(vaga.titulo) * PESO_TITULO + tokens(vaga.descricao)
+def job_document(job: Job) -> list[str]:
+    return tokens(job.title) * TITLE_WEIGHT + tokens(job.description)
 
 
-def bm25(consulta: Sequence[str], documentos: Sequence[Sequence[str]]) -> list[float]:
-    if not documentos:
+def bm25(query: Sequence[str], documents: Sequence[Sequence[str]]) -> list[float]:
+    if not documents:
         return []
-    n = len(documentos)
-    media = sum(len(d) for d in documentos) / n or 1.0
+    n = len(documents)
+    average = sum(len(d) for d in documents) / n or 1.0
     df: Counter[str] = Counter()
-    for d in documentos:
+    for d in documents:
         df.update(set(d))
-    pesos_consulta = Counter(consulta)
+    query_weights = Counter(query)
     scores = []
-    for d in documentos:
+    for d in documents:
         tf = Counter(d)
         total = 0.0
-        for termo, repeticoes in pesos_consulta.items():
-            f = tf.get(termo)
+        for term, repeats in query_weights.items():
+            f = tf.get(term)
             if not f:
                 continue
-            idf = math.log((n - df[termo] + 0.5) / (df[termo] + 0.5) + 1)
-            total += repeticoes * idf * f * (K1 + 1) / (f + K1 * (1 - B + B * len(d) / media))
+            idf = math.log((n - df[term] + 0.5) / (df[term] + 0.5) + 1)
+            total += repeats * idf * f * (K1 + 1) / (f + K1 * (1 - B + B * len(d) / average))
         scores.append(total)
     return scores
 
 
-def preranquear(perfil: Perfil, vagas: Sequence[Vaga]) -> list[float]:
-    """Score BM25 de cada vaga, na mesma ordem de `vagas`."""
-    return bm25(consulta_do_perfil(perfil), [documento_da_vaga(v) for v in vagas])
+def prerank(profile: Profile, jobs: Sequence[Job]) -> list[float]:
+    """BM25 score of each job, in the same order as `jobs`."""
+    return bm25(profile_query(profile), [job_document(j) for j in jobs])

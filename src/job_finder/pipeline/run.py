@@ -1,7 +1,7 @@
-"""Uma rodada do pipeline: coletar → normalizar → deduplicar → salvar → filtrar por perfil.
+"""One pipeline run: collect -> normalize -> deduplicate -> store -> filter per profile.
 
-A coleta é feita uma vez para todos os perfis (economiza quota); os filtros e,
-a partir do M2, o scoring são aplicados por perfil.
+Collection happens once for all profiles (saves quota); the filters and the scoring are
+applied per profile.
 """
 
 import logging
@@ -13,133 +13,133 @@ from datetime import datetime, timedelta
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
-from job_finder.connectors.base import Conector
+from job_finder.connectors.base import Connector
 from job_finder.db import repo
-from job_finder.db.models import ExecucaoDB, MatchDB, PerfilDB
-from job_finder.domain import Query, StatusMatch, Vaga, VagaBruta
-from job_finder.pipeline.dedup import chave_dedup
-from job_finder.pipeline.filters import motivo_descarte
-from job_finder.pipeline.normalize import normalizar
-from job_finder.quota import Quota, QuotaEsgotada
+from job_finder.db.models import MatchDB, ProfileDB, RunDB
+from job_finder.domain import Job, MatchStatus, Query, RawJob
+from job_finder.pipeline.dedup import dedup_key
+from job_finder.pipeline.filters import discard_reason
+from job_finder.pipeline.normalize import normalize
+from job_finder.quota import Quota, QuotaExhausted
 
 log = logging.getLogger(__name__)
 
 
 @dataclass
-class ResumoPerfil:
-    nome: str
-    avaliadas: int = 0
-    aprovadas: list[Vaga] = field(default_factory=list)
-    descartes: Counter[str] = field(default_factory=Counter)
+class ProfileSummary:
+    name: str
+    evaluated: int = 0
+    approved: list[Job] = field(default_factory=list)
+    discards: Counter[str] = field(default_factory=Counter)
 
 
 @dataclass
-class ResumoRodada:
-    execucao_id: int
-    coletadas: int = 0
-    novas: int = 0
-    por_fonte: Counter[str] = field(default_factory=Counter)
-    perfis: list[ResumoPerfil] = field(default_factory=list)
-    erros: list[str] = field(default_factory=list)
+class RunSummary:
+    run_id: int
+    collected: int = 0
+    new: int = 0
+    by_source: Counter[str] = field(default_factory=Counter)
+    profiles: list[ProfileSummary] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
 
-def _queries(perfis: Sequence[PerfilDB]) -> list[Query]:
-    """União das queries ativas de todos os perfis, sem repetição."""
-    vistas: dict[tuple[str, tuple[str, ...]], Query] = {}
-    for p in perfis:
-        for q in repo.perfil_de(p).queries:
-            if q.ativa:
-                vistas.setdefault((q.termo.casefold(), tuple(sorted(q.paises))), q)
-    return list(vistas.values())
+def _queries(profiles: Sequence[ProfileDB]) -> list[Query]:
+    """Union of the active queries of every profile, without repeats."""
+    seen: dict[tuple[str, tuple[str, ...]], Query] = {}
+    for p in profiles:
+        for q in repo.profile_from(p).queries:
+            if q.active:
+                seen.setdefault((q.term.casefold(), tuple(sorted(q.countries))), q)
+    return list(seen.values())
 
 
-def coletar(
-    engine: Engine, conectores: Sequence[Conector], queries: list[Query], agora: datetime
-) -> tuple[list[VagaBruta], list[str]]:
-    brutas: list[VagaBruta] = []
-    erros: list[str] = []
-    for conector in conectores:
+def collect(
+    engine: Engine, connectors: Sequence[Connector], queries: list[Query], now: datetime
+) -> tuple[list[RawJob], list[str]]:
+    raws: list[RawJob] = []
+    errors: list[str] = []
+    for connector in connectors:
         quota = Quota(
             engine,
-            conector.nome,
-            conector.limite_diario,
-            agora.date(),
-            limite_mensal=getattr(conector, "limite_mensal", None),
+            connector.name,
+            connector.daily_limit,
+            now.date(),
+            monthly_limit=getattr(connector, "monthly_limit", None),
         )
         try:
-            resultado = conector.buscar(queries, quota)
-        except QuotaEsgotada as e:
-            erros.append(str(e))
+            result = connector.search(queries, quota)
+        except QuotaExhausted as e:
+            errors.append(str(e))
             continue
-        except Exception as e:  # uma fonte com problema não derruba as outras
-            log.exception("conector %s falhou", conector.nome)
-            erros.append(f"{conector.nome}: {type(e).__name__}: {e}")
+        except Exception as e:  # one broken source does not take down the others
+            log.exception("connector %s failed", connector.name)
+            errors.append(f"{connector.name}: {type(e).__name__}: {e}")
             continue
-        log.info("%s: %d vagas", conector.nome, len(resultado))
-        brutas.extend(resultado)
-    return brutas, erros
+        log.info("%s: %d jobs", connector.name, len(result))
+        raws.extend(result)
+    return raws, errors
 
 
-def executar_rodada(
+def execute_run(
     s: Session,
     engine: Engine,
-    conectores: Sequence[Conector],
-    perfis: Sequence[PerfilDB],
-    agora: datetime,
-    tipo: str = "sob_demanda",
-) -> ResumoRodada:
-    # A coleta (rede + quota, que grava em transação própria) vem antes de qualquer
-    # escrita desta sessão: o SQLite aceita um escritor por vez, e chamadas HTTP
-    # lentas não devem segurar o lock do banco.
-    brutas, erros = coletar(engine, conectores, _queries(perfis), agora)
+    connectors: Sequence[Connector],
+    profiles: Sequence[ProfileDB],
+    now: datetime,
+    kind: str = "on_demand",
+) -> RunSummary:
+    # Collection (network + quota, which writes in its own transaction) comes before any
+    # write in this session: SQLite takes one writer at a time, and slow HTTP calls must
+    # not hold the database lock.
+    raws, errors = collect(engine, connectors, _queries(profiles), now)
 
-    execucao = ExecucaoDB(tipo=tipo, status="rodando", iniciada_em=agora)
-    s.add(execucao)
+    run = RunDB(kind=kind, status="running", started_at=now)
+    s.add(run)
     s.flush()
-    resumo = ResumoRodada(execucao_id=execucao.id, erros=list(erros))
+    summary = RunSummary(run_id=run.id, errors=list(errors))
 
-    for bruta in brutas:
+    for raw in raws:
         try:
-            vaga = normalizar(bruta)
-            _, nova = repo.registrar_vaga(s, bruta, vaga, chave_dedup(vaga))
+            job = normalize(raw)
+            _, is_new = repo.record_job(s, raw, job, dedup_key(job))
         except Exception as e:
-            log.exception("falha ao normalizar %s/%s", bruta.fonte, bruta.id_fonte)
-            resumo.erros.append(f"{bruta.fonte}/{bruta.id_fonte}: {type(e).__name__}: {e}")
+            log.exception("failed to normalize %s/%s", raw.source, raw.source_id)
+            summary.errors.append(f"{raw.source}/{raw.source_id}: {type(e).__name__}: {e}")
             continue
-        resumo.coletadas += 1
-        resumo.por_fonte[bruta.fonte] += 1
-        resumo.novas += int(nova)
+        summary.collected += 1
+        summary.by_source[raw.source] += 1
+        summary.new += int(is_new)
 
-    for perfil_db in perfis:
-        resumo.perfis.append(_filtrar_para_perfil(s, perfil_db, agora))
+    for profile_db in profiles:
+        summary.profiles.append(_filter_for_profile(s, profile_db, now))
 
-    execucao.finalizada_em = datetime.now(agora.tzinfo)
-    execucao.vagas_coletadas = resumo.coletadas
-    execucao.vagas_novas = resumo.novas
-    execucao.matches_novos = sum(len(p.aprovadas) for p in resumo.perfis)
-    execucao.erros = resumo.erros
-    if not resumo.erros:
-        execucao.status = "ok"
-    elif resumo.coletadas:
-        execucao.status = "parcial"
+    run.finished_at = datetime.now(now.tzinfo)
+    run.jobs_collected = summary.collected
+    run.jobs_new = summary.new
+    run.matches_new = sum(len(p.approved) for p in summary.profiles)
+    run.errors = summary.errors
+    if not summary.errors:
+        run.status = "ok"
+    elif summary.collected:
+        run.status = "partial"
     else:
-        execucao.status = "erro"
-    return resumo
+        run.status = "error"
+    return summary
 
 
-def _filtrar_para_perfil(s: Session, perfil_db: PerfilDB, agora: datetime) -> ResumoPerfil:
-    perfil = repo.perfil_de(perfil_db)
-    resumo = ResumoPerfil(nome=perfil.nome)
-    desde = agora - timedelta(days=perfil.filtros.idade_maxima_dias)
-    for vaga_db in repo.candidatas(s, perfil_db.id, desde):
-        vaga = repo.vaga_de(vaga_db)
-        resumo.avaliadas += 1
-        motivo = motivo_descarte(vaga, perfil.filtros, agora)
-        if motivo:
-            resumo.descartes[motivo] += 1
+def _filter_for_profile(s: Session, profile_db: ProfileDB, now: datetime) -> ProfileSummary:
+    profile = repo.profile_from(profile_db)
+    summary = ProfileSummary(name=profile.name)
+    since = now - timedelta(days=profile.filters.max_age_days)
+    for job_db in repo.candidates(s, profile_db.id, since):
+        job = repo.job_from(job_db)
+        summary.evaluated += 1
+        reason = discard_reason(job, profile.filters, now)
+        if reason:
+            summary.discards[reason] += 1
             continue
-        # Passou nos filtros: fica pendente até o scoring (M2).
-        s.add(MatchDB(vaga_id=vaga_db.id, perfil_id=perfil_db.id, status=StatusMatch.PENDENTE))
-        resumo.aprovadas.append(vaga)
+        # Passed the filters: stays pending until scoring.
+        s.add(MatchDB(job_id=job_db.id, profile_id=profile_db.id, status=MatchStatus.PENDING))
+        summary.approved.append(job)
     s.flush()
-    return resumo
+    return summary

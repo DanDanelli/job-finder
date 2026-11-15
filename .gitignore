@@ -7,6 +7,6 @@ data/
 .mypy_cache/
 .ruff_cache/
 dist/
-# Perfis pessoais (só o exemplo vai para o repositório)
-perfis/*
-!perfis/exemplo.yaml
+# Personal profiles (only the example goes into the repository)
+profiles/*
+!profiles/example.yaml

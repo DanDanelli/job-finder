@@ -1,4 +1,4 @@
-"""Modelos de domínio compartilhados por conectores, pipeline, LLM e interfaces."""
+"""Domain models shared by connectors, the pipeline, the LLM layer and the interfaces."""
 
 from datetime import datetime
 from enum import StrEnum
@@ -7,145 +7,145 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, Field, HttpUrl
 
 
-class Modalidade(StrEnum):
-    REMOTO = "remoto"
-    HIBRIDO = "hibrido"
-    PRESENCIAL = "presencial"
-    DESCONHECIDA = "desconhecida"
+class WorkMode(StrEnum):
+    REMOTE = "remote"
+    HYBRID = "hybrid"
+    ONSITE = "onsite"
+    UNKNOWN = "unknown"
 
 
-class TipoContrato(StrEnum):
-    TEMPO_INTEGRAL = "tempo_integral"
-    MEIO_PERIODO = "meio_periodo"
-    CONTRATO = "contrato"  # contractor, PJ
+class ContractType(StrEnum):
+    FULL_TIME = "full_time"  # in Brazil, CLT
+    PART_TIME = "part_time"
+    CONTRACT = "contract"  # contractor; in Brazil, PJ
     FREELANCE = "freelance"
-    ESTAGIO = "estagio"
-    TEMPORARIO = "temporario"
+    INTERNSHIP = "internship"
+    TEMPORARY = "temporary"
 
 
-class StatusMatch(StrEnum):
-    PENDENTE = "pendente"  # passou nos filtros, aguardando scoring (ou scoring falhou)
-    NOVA = "nova"  # com nota, ainda sem ação do usuário
-    SALVA = "salva"
-    DESCARTADA = "descartada"
+class MatchStatus(StrEnum):
+    PENDING = "pending"  # passed the filters, waiting for scoring (or scoring failed)
+    NEW = "new"  # scored, no user action yet
+    SAVED = "saved"
+    DISMISSED = "dismissed"
 
 
-PeriodoSalario = Literal["ano", "mes", "hora"]
-CodigoPais = Annotated[str, Field(pattern=r"^[A-Z]{2}$")]  # ISO 3166-1 alfa-2
-# Código de país ISO alfa-2 ou de região (ver pipeline/locais.py), ex: "PT", "EUROPE".
-CodigoLocal = Annotated[str, Field(pattern=r"^[A-Z_]{2,}$")]
+SalaryPeriod = Literal["year", "month", "hour"]
+CountryCode = Annotated[str, Field(pattern=r"^[A-Z]{2}$")]  # ISO 3166-1 alpha-2
+# ISO alpha-2 country code or a region code (see pipeline/locations.py), e.g. "BR", "LATAM".
+LocationCode = Annotated[str, Field(pattern=r"^[A-Z_]{2,}$")]
 
 
-class Salario(BaseModel):
-    minimo: float | None = None
-    maximo: float | None = None
-    moeda: str | None = None  # ISO 4217, ex: "EUR"
-    periodo: PeriodoSalario | None = None
+class Salary(BaseModel):
+    minimum: float | None = None
+    maximum: float | None = None
+    currency: str | None = None  # ISO 4217, e.g. "BRL"
+    period: SalaryPeriod | None = None
 
 
-class VagaBruta(BaseModel):
-    """Vaga como um conector a entrega, antes da normalização."""
+class RawJob(BaseModel):
+    """A job posting as a connector delivers it, before normalization."""
 
-    fonte: str
-    id_fonte: str
-    titulo: str
-    empresa: str | None = None
-    local: str | None = None  # texto livre, ex: "LATAM, Europe" ou "Lisboa, Portugal"
-    descricao: str | None = None  # texto puro (o conector remove o HTML)
+    source: str
+    source_id: str
+    title: str
+    company: str | None = None
+    location: str | None = None  # free text, e.g. "LATAM, Europe" or "São Paulo, SP"
+    description: str | None = None  # plain text (the connector strips the HTML)
     url: HttpUrl
-    url_candidatura: HttpUrl | None = None
-    publicada_em: datetime | None = None
-    modalidade: str | None = None  # texto livre da fonte, ex: "remote", "hybrid"
-    tipo_contrato: str | None = None  # texto livre da fonte, ex: "full_time"
-    salario: Salario | None = None  # quando a fonte já entrega estruturado
-    salario_texto: str | None = None  # quando a fonte entrega texto, ex: "$35k - $52k"
+    apply_url: HttpUrl | None = None
+    posted_at: datetime | None = None
+    work_mode: str | None = None  # source's free text, e.g. "remote", "hybrid"
+    contract_type: str | None = None  # source's free text, e.g. "full_time"
+    salary: Salary | None = None  # when the source gives it structured
+    salary_text: str | None = None  # when the source gives text, e.g. "$35k - $52k"
     tags: list[str] = Field(default_factory=list)
-    dados_brutos: dict[str, Any] = Field(default_factory=dict)
+    raw_data: dict[str, Any] = Field(default_factory=dict)
 
 
-class Vaga(BaseModel):
-    """Vaga normalizada e deduplicada."""
+class Job(BaseModel):
+    """A normalized, deduplicated job posting."""
 
-    titulo: str
-    empresa: str | None = None
-    pais: CodigoPais | None = None
-    cidade: str | None = None
-    local_texto: str | None = None
-    # Países/regiões de onde se pode trabalhar (vagas remotas). Vazio = desconhecido.
-    locais_elegiveis: list[CodigoLocal] = Field(default_factory=list)
-    modalidade: Modalidade = Modalidade.DESCONHECIDA
-    tipo_contrato: TipoContrato | None = None
-    descricao: str | None = None
-    salario: Salario | None = None
-    publicada_em: datetime | None = None
+    title: str
+    company: str | None = None
+    country: CountryCode | None = None
+    city: str | None = None
+    location_text: str | None = None
+    # Countries/regions people can work from (remote jobs). Empty = unknown.
+    eligible_locations: list[LocationCode] = Field(default_factory=list)
+    work_mode: WorkMode = WorkMode.UNKNOWN
+    contract_type: ContractType | None = None
+    description: str | None = None
+    salary: Salary | None = None
+    posted_at: datetime | None = None
     url: HttpUrl
-    url_candidatura: HttpUrl | None = None
+    apply_url: HttpUrl | None = None
 
 
 class Skill(BaseModel):
-    nome: str
-    peso: int = Field(default=3, ge=1, le=5)
+    name: str
+    weight: int = Field(default=3, ge=1, le=5)
 
 
-class Idioma(BaseModel):
-    codigo: str  # ISO 639-1, ex: "pt"
-    nivel: Literal["basico", "intermediario", "avancado", "fluente", "nativo"]
+class Language(BaseModel):
+    code: str  # ISO 639-1, e.g. "pt"
+    level: Literal["basic", "intermediate", "advanced", "fluent", "native"]
 
 
 class Query(BaseModel):
-    termo: str
-    paises: list[CodigoPais] = Field(default_factory=list)  # vazio = global
-    ativa: bool = True
+    term: str
+    countries: list[CountryCode] = Field(default_factory=list)  # empty = global
+    active: bool = True
 
 
-class Filtros(BaseModel):
-    """Filtros duros, aplicados em código antes de qualquer chamada ao LLM."""
+class Filters(BaseModel):
+    """Hard filters, applied in code before any LLM call."""
 
-    # Países aceitos para vagas presenciais/híbridas. Vazio = qualquer.
-    paises: list[CodigoPais] = Field(default_factory=list)
-    cidades: list[str] = Field(default_factory=list)
-    # Países de onde a pessoa pode trabalhar remotamente (residência/autorização).
-    # Uma vaga remota passa se for elegível para algum deles. Vazio = não filtra.
-    remoto_a_partir_de: list[CodigoPais] = Field(default_factory=list)
-    modalidades: list[Modalidade] = Field(default_factory=list)  # vazio = todas
-    idiomas: list[str] = Field(default_factory=list)  # avaliado pelo LLM (M2), não em código
-    tipos_contrato: list[TipoContrato] = Field(default_factory=list)  # vazio = todos
-    # Mínimo geral, e mínimos por tipo de contrato (ex: CLT = tempo_integral, PJ = contrato).
-    # Vaga sem tipo de contrato usa o geral.
-    salario_minimo: Salario | None = None
-    salario_minimo_por_contrato: dict[TipoContrato, Salario] = Field(default_factory=dict)
-    empresas_bloqueadas: list[str] = Field(default_factory=list)
-    palavras_bloqueadas: list[str] = Field(default_factory=list)
-    idade_maxima_dias: int = Field(default=14, ge=1)
+    # Countries accepted for onsite/hybrid jobs. Empty = any.
+    countries: list[CountryCode] = Field(default_factory=list)
+    cities: list[str] = Field(default_factory=list)
+    # Countries the person can work remotely from (residence/work authorization).
+    # A remote job passes if it is open to any of them. Empty = no filter.
+    remote_from: list[CountryCode] = Field(default_factory=list)
+    work_modes: list[WorkMode] = Field(default_factory=list)  # empty = all
+    languages: list[str] = Field(default_factory=list)  # weighed by the LLM, not in code
+    contract_types: list[ContractType] = Field(default_factory=list)  # empty = all
+    # General minimum, plus minimums per contract type (e.g. full_time = CLT,
+    # contract = PJ). A job with no contract type uses the general one.
+    min_salary: Salary | None = None
+    min_salary_by_contract: dict[ContractType, Salary] = Field(default_factory=dict)
+    blocked_companies: list[str] = Field(default_factory=list)
+    blocked_keywords: list[str] = Field(default_factory=list)
+    max_age_days: int = Field(default=14, ge=1)
 
 
-class DadosPerfil(BaseModel):
-    """Perfil profissional extraído do currículo e revisado pelo usuário."""
+class ProfileData(BaseModel):
+    """Professional profile extracted from the CV and reviewed by the user."""
 
-    resumo: str = ""
-    cargos: list[str] = Field(default_factory=list)
-    senioridade: str | None = None
-    anos_experiencia: int | None = Field(default=None, ge=0)
+    summary: str = ""
+    roles: list[str] = Field(default_factory=list)
+    seniority: str | None = None
+    years_experience: int | None = Field(default=None, ge=0)
     skills: list[Skill] = Field(default_factory=list)
-    idiomas: list[Idioma] = Field(default_factory=list)
-    setores: list[str] = Field(default_factory=list)
-    certificacoes: list[str] = Field(default_factory=list)
+    languages: list[Language] = Field(default_factory=list)
+    industries: list[str] = Field(default_factory=list)
+    certifications: list[str] = Field(default_factory=list)
 
 
-class Perfil(BaseModel):
-    nome: str
+class Profile(BaseModel):
+    name: str
     telegram_chat_id: int | None = None
-    dados: DadosPerfil = Field(default_factory=DadosPerfil)
+    data: ProfileData = Field(default_factory=ProfileData)
     queries: list[Query] = Field(default_factory=list)
-    filtros: Filtros = Field(default_factory=Filtros)
-    preferencias: str = ""
+    filters: Filters = Field(default_factory=Filters)
+    preferences: str = ""
 
 
-class ResultadoFit(BaseModel):
-    """Saída estruturada do scoring de uma vaga para um perfil."""
+class FitResult(BaseModel):
+    """Structured output of scoring one job for one profile."""
 
     score: int = Field(ge=0, le=100)
-    pontos_fortes: list[str] = Field(default_factory=list)
+    strengths: list[str] = Field(default_factory=list)
     gaps: list[str] = Field(default_factory=list)
     dealbreakers: list[str] = Field(default_factory=list)
-    resumo: str
+    summary: str

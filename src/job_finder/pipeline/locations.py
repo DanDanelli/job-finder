@@ -1,6 +1,6 @@
-"""Interpretação de locais em texto livre e elegibilidade de vagas remotas.
+"""Parsing free-text locations and the eligibility of remote jobs.
 
-Um local vira uma lista de códigos: países ISO alfa-2 ("PT") ou regiões ("EUROPE").
+A location becomes a list of codes: ISO alpha-2 countries ("BR") or regions ("LATAM").
 """
 
 import re
@@ -8,16 +8,16 @@ from functools import cache
 
 import pycountry
 
-from job_finder.texto import chave
+from job_finder.text import key
 
 WORLDWIDE = "WORLDWIDE"
 
 # fmt: off
-_UE = {
+_EU = {
     "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE",
     "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE",
 }
-_EUROPA = _UE | {
+_EUROPE = _EU | {
     "AL", "AD", "BA", "BY", "CH", "FO", "GB", "GI", "IS", "LI", "MC", "MD", "ME", "MK",
     "NO", "RS", "SM", "UA", "VA", "XK",
 }
@@ -25,29 +25,29 @@ _LATAM = {
     "AR", "BO", "BR", "CL", "CO", "CR", "CU", "DO", "EC", "GT", "HN", "MX", "NI", "PA",
     "PE", "PR", "PY", "SV", "UY", "VE",
 }
-_AMERICA_DO_NORTE = {"US", "CA", "MX"}
+_NORTH_AMERICA = {"US", "CA", "MX"}
 _APAC = {
     "AU", "BD", "CN", "FJ", "HK", "ID", "IN", "JP", "KH", "KR", "LK", "MM", "MN", "MY",
     "NP", "NZ", "PH", "PK", "SG", "TH", "TW", "VN",
 }
-_ORIENTE_MEDIO = {"AE", "BH", "IL", "IQ", "JO", "KW", "LB", "OM", "QA", "SA", "TR"}
+_MIDDLE_EAST = {"AE", "BH", "IL", "IQ", "JO", "KW", "LB", "OM", "QA", "SA", "TR"}
 _AFRICA = {
     "DZ", "AO", "CM", "CI", "EG", "ET", "GH", "KE", "MA", "MU", "MZ", "NG", "RW", "SN",
     "TN", "TZ", "UG", "ZA", "ZM", "ZW",
 }
 # fmt: on
 
-REGIOES: dict[str, frozenset[str]] = {
-    "EU": frozenset(_UE),
-    "EUROPE": frozenset(_EUROPA),
+REGIONS: dict[str, frozenset[str]] = {
+    "EU": frozenset(_EU),
+    "EUROPE": frozenset(_EUROPE),
     "LATAM": frozenset(_LATAM),
-    "NORTH_AMERICA": frozenset(_AMERICA_DO_NORTE),
-    "AMERICAS": frozenset(_LATAM | _AMERICA_DO_NORTE),
+    "NORTH_AMERICA": frozenset(_NORTH_AMERICA),
+    "AMERICAS": frozenset(_LATAM | _NORTH_AMERICA),
     "APAC": frozenset(_APAC),
-    "EMEA": frozenset(_EUROPA | _ORIENTE_MEDIO | _AFRICA),
+    "EMEA": frozenset(_EUROPE | _MIDDLE_EAST | _AFRICA),
 }
 
-_ALIASES_REGIAO = {
+_REGION_ALIASES = {
     "worldwide": WORLDWIDE,
     "anywhere": WORLDWIDE,
     "global": WORLDWIDE,
@@ -70,7 +70,7 @@ _ALIASES_REGIAO = {
     "emea": "EMEA",
 }
 
-_ALIASES_PAIS = {
+_COUNTRY_ALIASES = {
     "usa": "US",
     "us": "US",
     "u s": "US",
@@ -99,7 +99,7 @@ _ALIASES_PAIS = {
     "russia": "RU",
     "south korea": "KR",
     "uae": "AE",
-    # Nomes locais comuns em vagas europeias
+    # Local names common in European postings
     "deutschland": "DE",
     "osterreich": "AT",
     "schweiz": "CH",
@@ -114,66 +114,66 @@ _ALIASES_PAIS = {
     "norge": "NO",
 }
 
-# Siglas de estados brasileiros. Várias coincidem com códigos de país (MG = Madagascar,
-# ES = Espanha, PA = Panamá, PE = Peru...): "Contagem - MG, Brasil" não é Madagascar.
-_UFS = {
+# Brazilian state codes. Several clash with country codes (MG = Madagascar, ES = Spain,
+# PA = Panama, PE = Peru...): "Contagem - MG, Brasil" is not Madagascar.
+_BR_STATES = {
     "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA",
     "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO",
 }  # fmt: skip
 
-# Palavras que acompanham o local mas não mudam o significado.
-_RUIDO = re.compile(r"\b(only|timezones?|time zones?|based|remote|remoto|apenas|somente)\b")
-_SEPARADORES = re.compile(r"[,;/|()]|\s+[-\u2013]\s+|\s+(?:or|and|ou|e)\s+|\s+&\s+")
+# Words that come with a location but do not change its meaning.
+_NOISE = re.compile(r"\b(only|timezones?|time zones?|based|remote|remoto|apenas|somente)\b")
+_SEPARATORS = re.compile(r"[,;/|()]|\s+[-\u2013]\s+|\s+(?:or|and|ou|e)\s+|\s+&\s+")
 
 
 @cache
-def _pais(nome: str) -> str | None:
-    if nome in _ALIASES_PAIS:
-        return _ALIASES_PAIS[nome]
+def _country(name: str) -> str | None:
+    if name in _COUNTRY_ALIASES:
+        return _COUNTRY_ALIASES[name]
     try:
-        return str(pycountry.countries.lookup(nome).alpha_2)
+        return str(pycountry.countries.lookup(name).alpha_2)
     except LookupError:
         return None
 
 
-def interpretar_local(texto: str | None) -> list[str]:
-    """Converte "LATAM, Europe, USA" em ["LATAM", "EUROPE", "US"].
+def parse_location(text: str | None) -> list[str]:
+    """Turns "LATAM, Europe, USA" into ["LATAM", "EUROPE", "US"].
 
-    Trechos não reconhecidos (cidades, por exemplo) são ignorados. Lista vazia
-    significa que não deu para interpretar nada.
+    Unrecognized pieces (cities, for example) are ignored. An empty list means nothing
+    could be parsed.
     """
-    if not texto:
+    if not text:
         return []
-    codigos: list[str] = []
-    siglas: set[str] = set()
-    for pedaco in _SEPARADORES.split(texto):
-        if not pedaco:
+    codes: list[str] = []
+    two_letter: set[str] = set()
+    for piece in _SEPARATORS.split(text):
+        if not piece:
             continue
-        nome = chave(_RUIDO.sub(" ", chave(pedaco)))
-        if not nome:
+        name = key(_NOISE.sub(" ", key(piece)))
+        if not name:
             continue
-        codigo = _ALIASES_REGIAO.get(nome) or _pais(nome)
-        if codigo and len(nome) == 2:
-            siglas.add(codigo)
-        if codigo and codigo not in codigos:
-            codigos.append(codigo)
-    if "BR" in codigos:
-        # Com o Brasil explícito, sigla de UF é estado, não país.
-        codigos = [c for c in codigos if not (c in siglas and c in _UFS and c != "BR")]
-    return codigos
+        code = _REGION_ALIASES.get(name) or _country(name)
+        if code and len(name) == 2:
+            two_letter.add(code)
+        if code and code not in codes:
+            codes.append(code)
+    if "BR" in codes:
+        # With Brazil explicit, a state code is a state, not a country.
+        codes = [c for c in codes if not (c in two_letter and c in _BR_STATES and c != "BR")]
+    return codes
 
 
-def elegivel(locais: list[str], paises_da_pessoa: list[str]) -> bool | None:
-    """A pessoa, morando em algum de `paises_da_pessoa`, pode aceitar a vaga?
+def is_eligible(locations: list[str], person_countries: list[str]) -> bool | None:
+    """Can a person living in one of `person_countries` take the job?
 
-    Devolve None quando os locais da vaga são desconhecidos.
+    Returns None when the job's locations are unknown.
     """
-    if not locais:
+    if not locations:
         return None
-    if WORLDWIDE in locais:
+    if WORLDWIDE in locations:
         return True
-    for local in locais:
-        cobertos = REGIOES.get(local, frozenset({local}))
-        if any(p in cobertos for p in paises_da_pessoa):
+    for location in locations:
+        covered = REGIONS.get(location, frozenset({location}))
+        if any(c in covered for c in person_countries):
             return True
     return False

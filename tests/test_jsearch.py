@@ -1,4 +1,4 @@
-"""Conector JSearch e quota mensal, sem rede."""
+"""JSearch connector and monthly quota, without network."""
 
 import json
 from datetime import UTC, date, datetime, timedelta
@@ -11,18 +11,18 @@ from sqlalchemy import Engine
 
 from job_finder.config import Settings
 from job_finder.connectors import base
-from job_finder.connectors.jsearch import URL, JSearch, _id_estavel
-from job_finder.domain import Query, Salario
-from job_finder.pipeline.normalize import normalizar
-from job_finder.quota import Quota, QuotaEsgotada
+from job_finder.connectors.jsearch import URL, JSearch, _stable_id
+from job_finder.domain import Query, Salary
+from job_finder.pipeline.normalize import normalize
+from job_finder.quota import Quota, QuotaExhausted
 
 FIXTURE = Path(__file__).parent / "fixtures" / "jsearch" / "search.json"
-HOJE = date(2026, 11, 15)
-QUERIES = [Query(termo="Cloud Architect"), Query(termo="Platform Engineer"), Query(termo="SRE")]
+TODAY = date(2026, 11, 15)
+QUERIES = [Query(term="Cloud Architect"), Query(term="Platform Engineer"), Query(term="SRE")]
 
 
 def settings(**kw: object) -> Settings:
-    return Settings.model_validate({"jsearch_api_key": "chave-teste", **kw})
+    return Settings.model_validate({"jsearch_api_key": "test-key", **kw})
 
 
 @pytest.fixture
@@ -32,40 +32,40 @@ def api() -> respx.MockRouter:
         yield router
 
 
-def quota(engine: Engine, hoje: date = HOJE) -> Quota:
-    return Quota(engine, "jsearch", 6, hoje, limite_mensal=190)
+def quota(engine: Engine, today: date = TODAY) -> Quota:
+    return Quota(engine, "jsearch", 6, today, monthly_limit=190)
 
 
-AGORA = datetime(2026, 11, 15, 12, tzinfo=UTC)
+NOW = datetime(2026, 11, 15, 12, tzinfo=UTC)
 
 
-def conector(http: httpx.Client, **kw: object) -> JSearch:
-    return JSearch(http, settings(**kw), relogio=lambda: AGORA)
+def connector(http: httpx.Client, **kw: object) -> JSearch:
+    return JSearch(http, settings(**kw), clock=lambda: NOW)
 
 
-def test_converte_a_resposta_real(engine: Engine, api: respx.MockRouter) -> None:
-    with base.cliente_http() as http:
-        vagas = conector(http, jsearch_buscas_por_rodada=1).buscar(QUERIES, quota(engine))
+def test_converts_the_real_response(engine: Engine, api: respx.MockRouter) -> None:
+    with base.http_client() as http:
+        jobs = connector(http, jsearch_searches_per_run=1).search(QUERIES, quota(engine))
 
-    linkedin, glassdoor, floripa = vagas
-    assert linkedin.fonte == "jsearch"
-    assert linkedin.id_fonte == "mlnvcI2qJnU3DPq2AAAAAA=="  # docid do Google, estável
-    assert linkedin.titulo == "InfoSec Architecture/Cloud Specialist"
-    assert linkedin.empresa == "RHI Magnesita"
+    linkedin, glassdoor, floripa = jobs
+    assert linkedin.source == "jsearch"
+    assert linkedin.source_id == "mlnvcI2qJnU3DPq2AAAAAA=="  # Google's docid, stable
+    assert linkedin.title == "InfoSec Architecture/Cloud Specialist"
+    assert linkedin.company == "RHI Magnesita"
     assert str(linkedin.url).startswith("https://br.linkedin.com/jobs/view/")
-    assert linkedin.url_candidatura is None  # nenhuma opção direta
-    assert linkedin.publicada_em == AGORA - timedelta(days=19)  # "há 19 dias"
-    assert linkedin.dados_brutos["publisher"] == "LinkedIn"
-    n = normalizar(linkedin)
-    assert n.pais == "BR" and n.tipo_contrato == "tempo_integral"
+    assert linkedin.apply_url is None  # no direct option
+    assert linkedin.posted_at == NOW - timedelta(days=19)  # "há 19 dias"
+    assert linkedin.raw_data["publisher"] == "LinkedIn"
+    n = normalize(linkedin)
+    assert n.country == "BR" and n.contract_type == "full_time"
 
-    assert glassdoor.modalidade == "remote" and normalizar(glassdoor).modalidade == "remoto"
-    assert floripa.publicada_em == AGORA - timedelta(hours=22)
-    assert normalizar(floripa).tipo_contrato == "contrato"  # "Prestador de serviços"
-    assert normalizar(floripa).pais == "BR"  # "Santa Catarina" + job_country
+    assert glassdoor.work_mode == "remote" and normalize(glassdoor).work_mode == "remote"
+    assert floripa.posted_at == NOW - timedelta(hours=22)
+    assert normalize(floripa).contract_type == "contract"  # "Prestador de serviços"
+    assert normalize(floripa).country == "BR"  # "Santa Catarina" + job_country
 
 
-def test_job_id_estavel_entre_buscas() -> None:
+def test_job_id_is_stable_across_searches() -> None:
     import base64
 
     def job_id(token: str) -> str:
@@ -73,12 +73,12 @@ def test_job_id_estavel_entre_buscas() -> None:
             base64.urlsafe_b64encode(f"abcDEF123-_AAAAAA==:{token}".encode()).decode().rstrip("=")
         )
 
-    assert _id_estavel(job_id("busca1")) == _id_estavel(job_id("busca2")) == "abcDEF123-_AAAAAA=="
-    assert len(_id_estavel("nao-e-base64!!")) == 32
+    assert _stable_id(job_id("search1")) == _stable_id(job_id("search2")) == "abcDEF123-_AAAAAA=="
+    assert len(_stable_id("not-base64!!")) == 32
 
 
 @pytest.mark.parametrize(
-    ("texto", "idade"),
+    ("text", "age"),
     [
         ("há 22 horas", timedelta(hours=22)),
         ("há 1 dia", timedelta(days=1)),
@@ -88,12 +88,12 @@ def test_job_id_estavel_entre_buscas() -> None:
         ("3 days ago", timedelta(days=3)),
     ],
 )
-def test_data_relativa(texto: str, idade: timedelta) -> None:
-    assert conector(httpx.Client())._publicada({"job_posted_at": texto}) == AGORA - idade
-    assert conector(httpx.Client())._publicada({"job_posted_at": None}) is None
+def test_relative_date(text: str, age: timedelta) -> None:
+    assert connector(httpx.Client())._posted_at({"job_posted_at": text}) == NOW - age
+    assert connector(httpx.Client())._posted_at({"job_posted_at": None}) is None
 
 
-def test_salario_quando_vem() -> None:
+def test_salary_when_present() -> None:
     job = {
         "job_id": "x",
         "job_title": "Arquiteto",
@@ -103,17 +103,17 @@ def test_salario_quando_vem() -> None:
         "job_salary_period": "MONTH",
         "job_salary_string": "R$ 20 mil a R$ 28 mil por mês",
     }
-    v = conector(httpx.Client())._converter(job)
-    assert v is not None
-    assert v.salario == Salario(minimo=20000, maximo=28000, moeda=None, periodo="mes")
-    assert conector(httpx.Client())._converter({"job_id": "y", "job_title": "Sem link"}) is None
+    j = connector(httpx.Client())._convert(job)
+    assert j is not None
+    assert j.salary == Salary(minimum=20000, maximum=28000, currency=None, period="month")
+    assert connector(httpx.Client())._convert({"job_id": "y", "job_title": "No link"}) is None
 
 
-def test_envia_chave_pais_e_uma_pagina(engine: Engine, api: respx.MockRouter) -> None:
-    with base.cliente_http() as http:
-        conector(http, jsearch_buscas_por_rodada=1).buscar(QUERIES, quota(engine))
+def test_sends_key_country_and_one_page(engine: Engine, api: respx.MockRouter) -> None:
+    with base.http_client() as http:
+        connector(http, jsearch_searches_per_run=1).search(QUERIES, quota(engine))
     req = api.calls.last.request
-    assert req.headers["x-api-key"] == "chave-teste"
+    assert req.headers["x-api-key"] == "test-key"
     assert dict(req.url.params) == {
         "query": "Cloud Architect",
         "country": "br",
@@ -122,61 +122,61 @@ def test_envia_chave_pais_e_uma_pagina(engine: Engine, api: respx.MockRouter) ->
     }
 
 
-def test_rodizio_entre_rodadas(engine: Engine, api: respx.MockRouter) -> None:
-    conector_settings = settings(jsearch_buscas_por_rodada=2, jsearch_limite_diario=None)
-    with base.cliente_http() as http:
+def test_rotation_between_runs(engine: Engine, api: respx.MockRouter) -> None:
+    connector_settings = settings(jsearch_searches_per_run=2, jsearch_daily_limit=None)
+    with base.http_client() as http:
         for _ in range(3):
-            JSearch(http, conector_settings).buscar(QUERIES, quota(engine))
-    termos = [c.request.url.params["query"] for c in api.calls]
-    assert termos == [
+            JSearch(http, connector_settings).search(QUERIES, quota(engine))
+    terms = [c.request.url.params["query"] for c in api.calls]
+    assert terms == [
         "Cloud Architect", "Platform Engineer",
         "SRE", "Cloud Architect",
         "Platform Engineer", "SRE",
     ]  # fmt: skip
 
 
-def test_query_com_pais_proprio(engine: Engine) -> None:
-    j = JSearch(httpx.Client(), settings(jsearch_paises=["br", "pt"]))
-    pares = j.combinacoes([Query(termo="A"), Query(termo="B", paises=["ES"])])
-    assert pares == [("A", "br"), ("A", "pt"), ("B", "es")]
+def test_query_with_its_own_countries(engine: Engine) -> None:
+    j = JSearch(httpx.Client(), settings(jsearch_countries=["br", "pt"]))
+    pairs = j.pairs([Query(term="A"), Query(term="B", countries=["ES"])])
+    assert pairs == [("A", "br"), ("A", "pt"), ("B", "es")]
 
 
-def test_sem_chave_vira_erro_do_conector(engine: Engine) -> None:
-    with base.cliente_http() as http, pytest.raises(RuntimeError, match="JSEARCH_API_KEY"):
-        JSearch(http, Settings()).buscar(QUERIES, quota(engine))
+def test_missing_key_is_a_connector_error(engine: Engine) -> None:
+    with base.http_client() as http, pytest.raises(RuntimeError, match="JSEARCH_API_KEY"):
+        JSearch(http, Settings()).search(QUERIES, quota(engine))
 
 
-def test_status_de_erro_da_api(engine: Engine) -> None:
+def test_api_error_status(engine: Engine) -> None:
     with respx.mock:
         respx.get(URL).respond(200, json={"status": "ERROR", "error": {"message": "x"}})
-        with base.cliente_http() as http, pytest.raises(RuntimeError, match="ERROR"):
-            JSearch(http, settings()).buscar(QUERIES, quota(engine))
+        with base.http_client() as http, pytest.raises(RuntimeError, match="ERROR"):
+            JSearch(http, settings()).search(QUERIES, quota(engine))
 
 
-def test_registrado() -> None:
-    assert "jsearch" in base.disponiveis()
+def test_registered() -> None:
+    assert "jsearch" in base.available()
 
 
-# --- quota mensal -------------------------------------------------------------
+# --- monthly quota ------------------------------------------------------------
 
 
-def test_quota_mensal(engine: Engine) -> None:
-    for dia in (1, 2, 3):
-        Quota(engine, "j", None, date(2026, 11, dia), limite_mensal=3).consumir()
-    with pytest.raises(QuotaEsgotada, match="3/mês"):
-        Quota(engine, "j", None, date(2026, 11, 20), limite_mensal=3).consumir()
-    # Virada do mês zera; o diário continua valendo junto.
-    dezembro = Quota(engine, "j", 1, date(2026, 12, 1), limite_mensal=3)
-    assert dezembro.usadas_no_mes() == 0 and dezembro.disponivel() == 1
+def test_monthly_quota(engine: Engine) -> None:
+    for day in (1, 2, 3):
+        Quota(engine, "j", None, date(2026, 11, day), monthly_limit=3).consume()
+    with pytest.raises(QuotaExhausted, match="3/month"):
+        Quota(engine, "j", None, date(2026, 11, 20), monthly_limit=3).consume()
+    # A new month resets it; the daily limit still applies alongside.
+    december = Quota(engine, "j", 1, date(2026, 12, 1), monthly_limit=3)
+    assert december.used_this_month() == 0 and december.available() == 1
 
 
-def test_digest_mostra_o_site_de_origem() -> None:
-    from job_finder.db.models import VagaFonteDB
-    from job_finder.telegram.digest import _nome_fonte
+def test_digest_shows_the_origin_site() -> None:
+    from job_finder.db.models import JobSourceDB
+    from job_finder.telegram.digest import _source_name
 
-    def fonte(nome: str, **dados: str) -> VagaFonteDB:
-        return VagaFonteDB(fonte=nome, id_fonte="1", url="https://x.example", dados_brutos=dados)
+    def source(name: str, **data: str) -> JobSourceDB:
+        return JobSourceDB(source=name, source_id="1", url="https://x.example", raw_data=data)
 
-    assert _nome_fonte(fonte("jsearch", publisher="LinkedIn")) == "LinkedIn (Google for Jobs)"
-    assert _nome_fonte(fonte("remotive")) == "Remotive"
-    assert _nome_fonte(fonte("manual")) is None
+    assert _source_name(source("jsearch", publisher="LinkedIn")) == "LinkedIn (Google for Jobs)"
+    assert _source_name(source("remotive")) == "Remotive"
+    assert _source_name(source("manual")) is None

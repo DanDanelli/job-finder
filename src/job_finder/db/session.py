@@ -1,4 +1,4 @@
-"""Engine, sessões e migrações."""
+"""Engine, sessions and migrations."""
 
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -13,40 +13,40 @@ from sqlalchemy.orm import Session, sessionmaker
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
 
-def _configurar_sqlite(foreign_keys: bool) -> Any:
-    def configurar(dbapi_connection: Any, _record: Any) -> None:
+def _configure_sqlite(foreign_keys: bool) -> Any:
+    def configure(dbapi_connection: Any, _record: Any) -> None:
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute(f"PRAGMA foreign_keys={'ON' if foreign_keys else 'OFF'}")
         cursor.execute("PRAGMA busy_timeout=5000")
         cursor.close()
 
-    return configurar
+    return configure
 
 
-def criar_engine(url: str, *, foreign_keys: bool = True) -> Engine:
-    """Engine com WAL e busy_timeout no SQLite.
+def make_engine(url: str, *, foreign_keys: bool = True) -> Engine:
+    """Engine with WAL and busy_timeout on SQLite.
 
-    `foreign_keys=False` só nas migrações: o modo batch do Alembic recria a tabela
-    (cria a nova, copia, apaga a antiga), e com as FKs ligadas apagar a antiga dispara
-    o ON DELETE CASCADE nas tabelas filhas.
+    `foreign_keys=False` is for migrations only: Alembic's batch mode recreates the table
+    (create the new one, copy, drop the old one), and with FKs on, dropping the old one
+    fires ON DELETE CASCADE on the child tables.
     """
     if url.startswith("sqlite:///"):
         Path(url.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(url)
     if engine.dialect.name == "sqlite":
-        event.listen(engine, "connect", _configurar_sqlite(foreign_keys))
+        event.listen(engine, "connect", _configure_sqlite(foreign_keys))
     return engine
 
 
 @contextmanager
-def sessao(engine: Engine, *, commit: bool = True) -> Iterator[Session]:
-    """Sessão transacional: commit ao final do bloco, rollback em caso de erro.
+def session(engine: Engine, *, commit: bool = True) -> Iterator[Session]:
+    """Transactional session: commits at the end of the block, rolls back on error.
 
-    Com `commit=False` tudo é desfeito ao final (usado no dry-run).
+    With `commit=False` everything is undone at the end (used by dry runs).
     """
-    fabrica = sessionmaker(engine, expire_on_commit=False)
-    with fabrica() as s:
+    factory = sessionmaker(engine, expire_on_commit=False)
+    with factory() as s:
         s.begin()
         try:
             yield s
@@ -66,6 +66,6 @@ def alembic_config(url: str) -> Config:
     return cfg
 
 
-def upgrade(url: str, revisao: str = "head") -> None:
-    criar_engine(url).dispose()  # garante que o diretório do SQLite existe
-    command.upgrade(alembic_config(url), revisao)
+def upgrade(url: str, revision: str = "head") -> None:
+    make_engine(url).dispose()  # makes sure the SQLite directory exists
+    command.upgrade(alembic_config(url), revision)

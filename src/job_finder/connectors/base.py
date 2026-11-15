@@ -1,4 +1,4 @@
-"""Interface comum dos conectores e registro dos disponíveis."""
+"""Common connector interface and the registry of available connectors."""
 
 from collections.abc import Callable, Sequence
 from typing import Protocol
@@ -6,50 +6,50 @@ from typing import Protocol
 import httpx
 
 from job_finder import __version__
-from job_finder.domain import Query, VagaBruta
+from job_finder.domain import Query, RawJob
 from job_finder.quota import Quota
 
-USER_AGENT = f"job-finder/{__version__} (uso pessoal)"
+USER_AGENT = f"job-finder/{__version__} (personal use)"
 
 
-class Conector(Protocol):
-    nome: str
-    # Limite de chamadas HTTP por dia (termos da fonte ou free tier). None = sem limite.
-    limite_diario: int | None
+class Connector(Protocol):
+    name: str
+    # HTTP calls allowed per day (source's terms or free tier). None = no limit.
+    daily_limit: int | None
 
-    def buscar(self, queries: Sequence[Query], quota: Quota) -> list[VagaBruta]:
-        """Busca vagas para o conjunto de queries de todos os perfis.
+    def search(self, queries: Sequence[Query], quota: Quota) -> list[RawJob]:
+        """Searches jobs for the set of queries of all profiles.
 
-        Cada conector decide a estratégia: uma chamada por query, ou um catálogo
-        inteiro filtrado depois. Toda chamada HTTP passa por `quota.consumir()`.
+        Each connector picks its strategy: one call per query, or a whole catalog
+        filtered afterwards. Every HTTP call goes through `quota.consume()`.
         """
         ...
 
 
-FabricaConector = Callable[[httpx.Client], Conector]
-_REGISTRO: dict[str, FabricaConector] = {}
+ConnectorFactory = Callable[[httpx.Client], Connector]
+_REGISTRY: dict[str, ConnectorFactory] = {}
 
 
-def registrar(nome: str) -> Callable[[FabricaConector], FabricaConector]:
-    def decorador(fabrica: FabricaConector) -> FabricaConector:
-        _REGISTRO[nome] = fabrica
-        return fabrica
+def register(name: str) -> Callable[[ConnectorFactory], ConnectorFactory]:
+    def decorator(factory: ConnectorFactory) -> ConnectorFactory:
+        _REGISTRY[name] = factory
+        return factory
 
-    return decorador
-
-
-def disponiveis() -> list[str]:
-    return sorted(_REGISTRO)
+    return decorator
 
 
-def criar(nome: str, http: httpx.Client) -> Conector:
+def available() -> list[str]:
+    return sorted(_REGISTRY)
+
+
+def create(name: str, http: httpx.Client) -> Connector:
     try:
-        return _REGISTRO[nome](http)
+        return _REGISTRY[name](http)
     except KeyError:
-        raise ValueError(f"conector desconhecido: {nome} (disponíveis: {disponiveis()})") from None
+        raise ValueError(f"unknown connector: {name} (available: {available()})") from None
 
 
-def cliente_http() -> httpx.Client:
+def http_client() -> httpx.Client:
     return httpx.Client(
         headers={"User-Agent": USER_AGENT},
         timeout=httpx.Timeout(30.0, connect=10.0),

@@ -3,262 +3,248 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from job_finder.domain import (
-    Filtros,
-    Modalidade,
-    Salario,
-    TipoContrato,
-    Vaga,
-    VagaBruta,
+    ContractType,
+    Filters,
+    Job,
+    RawJob,
+    Salary,
+    WorkMode,
 )
-from job_finder.pipeline.dedup import chave_dedup, empresa_canonica, titulo_canonico
-from job_finder.pipeline.filters import motivo_descarte
-from job_finder.pipeline.locais import WORLDWIDE
-from job_finder.pipeline.normalize import normalizar
+from job_finder.pipeline.dedup import canonical_company, canonical_title, dedup_key
+from job_finder.pipeline.filters import discard_reason
+from job_finder.pipeline.locations import WORLDWIDE, parse_location
+from job_finder.pipeline.normalize import normalize
 
-AGORA = datetime(2026, 11, 15, 12, tzinfo=UTC)
+NOW = datetime(2026, 11, 15, 12, tzinfo=UTC)
 
 
-def bruta(**kw: object) -> VagaBruta:
+def raw(**kw: object) -> RawJob:
     base: dict[str, object] = {
-        "fonte": "teste",
-        "id_fonte": "1",
-        "titulo": "Cloud Architect",
-        "empresa": "Acme",
+        "source": "test",
+        "source_id": "1",
+        "title": "Cloud Architect",
+        "company": "Acme",
         "url": "https://example.com/1",
     }
-    return VagaBruta.model_validate(base | kw)
+    return RawJob.model_validate(base | kw)
 
 
-def vaga(**kw: object) -> Vaga:
+def job(**kw: object) -> Job:
     base: dict[str, object] = {
-        "titulo": "Cloud Architect",
-        "empresa": "Acme",
+        "title": "Cloud Architect",
+        "company": "Acme",
         "url": "https://example.com/1",
-        "publicada_em": AGORA - timedelta(days=1),
+        "posted_at": NOW - timedelta(days=1),
     }
-    return Vaga.model_validate(base | kw)
+    return Job.model_validate(base | kw)
 
 
-# --- normalização -------------------------------------------------------------
+# --- normalization ------------------------------------------------------------
 
 
-def test_normaliza_vaga_remota_do_remotive() -> None:
-    v = normalizar(
-        bruta(
-            titulo="  Senior   Data Engineer ",
-            empresa="Lemon.io ",
-            local="LATAM, Europe, USA, Canada, APAC",
-            modalidade="remote",
-            tipo_contrato="full_time",
-            salario_texto="$170k - $200k",
-            publicada_em=datetime(2026, 11, 11, 20, 17),  # sem tz, como vem da API
+def test_normalizes_a_remote_remotive_job() -> None:
+    j = normalize(
+        raw(
+            title="  Senior   Data Engineer ",
+            company="Lemon.io ",
+            location="LATAM, Europe, USA, Canada, APAC",
+            work_mode="remote",
+            contract_type="full_time",
+            salary_text="$170k - $200k",
+            posted_at=datetime(2026, 11, 11, 20, 17),  # no tz, as the API sends it
         )
     )
-    assert v.titulo == "Senior Data Engineer"
-    assert v.empresa == "Lemon.io"
-    assert v.modalidade == Modalidade.REMOTO
-    assert v.tipo_contrato == TipoContrato.TEMPO_INTEGRAL
-    assert v.locais_elegiveis == ["LATAM", "EUROPE", "US", "CA", "APAC"]
-    assert v.pais is None
-    assert v.salario == Salario(minimo=170_000, maximo=200_000, moeda="USD", periodo="ano")
-    assert v.publicada_em == datetime(2026, 11, 11, 20, 17, tzinfo=UTC)
+    assert j.title == "Senior Data Engineer"
+    assert j.company == "Lemon.io"
+    assert j.work_mode == WorkMode.REMOTE
+    assert j.contract_type == ContractType.FULL_TIME
+    assert j.eligible_locations == ["LATAM", "EUROPE", "US", "CA", "APAC"]
+    assert j.country is None
+    assert j.salary == Salary(minimum=170_000, maximum=200_000, currency="USD", period="year")
+    assert j.posted_at == datetime(2026, 11, 11, 20, 17, tzinfo=UTC)
 
 
-def test_pais_so_quando_o_local_e_um_unico_pais() -> None:
-    assert normalizar(bruta(local="USA")).pais == "US"
-    assert normalizar(bruta(local="USA, Canada")).pais is None
+def test_country_only_when_the_location_is_a_single_country() -> None:
+    assert normalize(raw(location="USA")).country == "US"
+    assert normalize(raw(location="USA, Canada")).country is None
 
 
-def test_worldwide_absorve_os_outros_locais() -> None:
-    assert normalizar(bruta(local="Worldwide, USA")).locais_elegiveis == [WORLDWIDE]
+def test_worldwide_absorbs_the_other_locations() -> None:
+    assert normalize(raw(location="Worldwide, USA")).eligible_locations == [WORLDWIDE]
 
 
-def test_salario_estruturado_da_fonte_tem_prioridade() -> None:
-    estruturado = Salario(minimo=1, maximo=2, moeda="EUR", periodo="ano")
-    assert normalizar(bruta(salario=estruturado, salario_texto="$9k")).salario == estruturado
+def test_structured_salary_from_the_source_wins() -> None:
+    structured = Salary(minimum=1, maximum=2, currency="EUR", period="year")
+    assert normalize(raw(salary=structured, salary_text="$9k")).salary == structured
 
 
 @pytest.mark.parametrize(
-    ("texto", "esperado"),
+    ("text", "expected"),
     [
-        ("Hybrid", Modalidade.HIBRIDO),
-        ("On-site", Modalidade.PRESENCIAL),
-        ("??", Modalidade.DESCONHECIDA),
+        ("Hybrid", WorkMode.HYBRID),
+        ("On-site", WorkMode.ONSITE),
+        ("Híbrido", WorkMode.HYBRID),
+        ("Presencial", WorkMode.ONSITE),
+        ("??", WorkMode.UNKNOWN),
     ],
 )
-def test_modalidade(texto: str, esperado: Modalidade) -> None:
-    assert normalizar(bruta(modalidade=texto)).modalidade == esperado
+def test_work_mode(text: str, expected: WorkMode) -> None:
+    assert normalize(raw(work_mode=text)).work_mode == expected
 
 
 # --- dedup --------------------------------------------------------------------
 
 
-def test_titulo_canonico() -> None:
-    assert titulo_canonico("Sr. Cloud Engineer (m/f/d)") == "senior cloud engineer"
-    assert titulo_canonico("Senior Cloud Engineer (M/W/D)") == "senior cloud engineer"
-    # Senioridade diferente é outra vaga.
-    assert titulo_canonico("Jr. Cloud Engineer") != titulo_canonico("Sr. Cloud Engineer")
+def test_canonical_title() -> None:
+    assert canonical_title("Sr. Cloud Engineer (m/f/d)") == "senior cloud engineer"
+    assert canonical_title("Senior Cloud Engineer (M/W/D)") == "senior cloud engineer"
+    # A different seniority is a different job.
+    assert canonical_title("Jr. Cloud Engineer") != canonical_title("Sr. Cloud Engineer")
 
 
 @pytest.mark.parametrize(
-    ("nome", "esperado"),
+    ("name", "expected"),
     [
         ("Acme Inc.", "acme"),
         ("Acme GmbH", "acme"),
         ("Natura S.A.", "natura"),
         ("Itaú Unibanco Ltda", "itau unibanco"),
-        ("Limited", "limited"),  # não apaga o nome inteiro
+        ("Limited", "limited"),  # does not erase the whole name
         (None, ""),
     ],
 )
-def test_empresa_canonica(nome: str | None, esperado: str) -> None:
-    assert empresa_canonica(nome) == esperado
+def test_canonical_company(name: str | None, expected: str) -> None:
+    assert canonical_company(name) == expected
 
 
-def test_mesma_vaga_em_fontes_diferentes_gera_mesma_chave() -> None:
-    a = normalizar(bruta(titulo="Sr Cloud Architect (m/f/d)", empresa="Acme GmbH", local="Germany"))
-    b = normalizar(bruta(titulo="Senior Cloud Architect", empresa="ACME", local="Deutschland"))
-    assert chave_dedup(a) == chave_dedup(b) == "acme|senior cloud architect|de"
+def test_same_job_from_different_sources_gets_the_same_key() -> None:
+    a = normalize(raw(title="Sr Cloud Architect (m/f/d)", company="Acme GmbH", location="Germany"))
+    b = normalize(raw(title="Senior Cloud Architect", company="ACME", location="Deutschland"))
+    assert dedup_key(a) == dedup_key(b) == "acme|senior cloud architect|de"
 
 
-def test_chave_de_vaga_remota_sem_pais() -> None:
-    v = normalizar(bruta(local="Worldwide", modalidade="remote"))
-    assert chave_dedup(v) == "acme|cloud architect|remoto"
+def test_key_of_a_remote_job_without_country() -> None:
+    j = normalize(raw(location="Worldwide", work_mode="remote"))
+    assert dedup_key(j) == "acme|cloud architect|remote"
 
 
-# --- filtros ------------------------------------------------------------------
+# --- filters ------------------------------------------------------------------
 
 
-def test_vaga_sem_filtros_passa() -> None:
-    assert motivo_descarte(vaga(), Filtros(), AGORA) is None
+def test_job_passes_with_no_filters() -> None:
+    assert discard_reason(job(), Filters(), NOW) is None
 
 
-def test_vaga_antiga() -> None:
-    antiga = vaga(publicada_em=AGORA - timedelta(days=30))
-    assert motivo_descarte(antiga, Filtros(idade_maxima_dias=14), AGORA) == "antiga"
-    assert motivo_descarte(vaga(publicada_em=None), Filtros(), AGORA) is None
+def test_old_job() -> None:
+    old = job(posted_at=NOW - timedelta(days=30))
+    assert discard_reason(old, Filters(max_age_days=14), NOW) == "too_old"
+    assert discard_reason(job(posted_at=None), Filters(), NOW) is None
 
 
-def test_modalidade_desconhecida_passa() -> None:
-    filtros = Filtros(modalidades=[Modalidade.REMOTO])
-    assert motivo_descarte(vaga(modalidade="presencial"), filtros, AGORA) == "modalidade"
-    assert motivo_descarte(vaga(modalidade="desconhecida"), filtros, AGORA) is None
+def test_unknown_work_mode_passes() -> None:
+    filters = Filters(work_modes=[WorkMode.REMOTE])
+    assert discard_reason(job(work_mode="onsite"), filters, NOW) == "work_mode"
+    assert discard_reason(job(work_mode="unknown"), filters, NOW) is None
 
 
-def test_remoto_precisa_aceitar_quem_mora_no_pais() -> None:
-    filtros = Filtros(remoto_a_partir_de=["PT"])
-    so_eua = vaga(modalidade="remoto", locais_elegiveis=["US"])
-    europa = vaga(modalidade="remoto", locais_elegiveis=["LATAM", "EUROPE"])
-    desconhecido = vaga(modalidade="remoto", locais_elegiveis=[])
-    assert motivo_descarte(so_eua, filtros, AGORA) == "local"
-    assert motivo_descarte(europa, filtros, AGORA) is None
-    assert motivo_descarte(desconhecido, filtros, AGORA) is None
+def test_remote_must_accept_residents_of_the_country() -> None:
+    filters = Filters(remote_from=["BR"])
+    us_only = job(work_mode="remote", eligible_locations=["US"])
+    latam = job(work_mode="remote", eligible_locations=["LATAM", "EUROPE"])
+    unknown = job(work_mode="remote", eligible_locations=[])
+    assert discard_reason(us_only, filters, NOW) == "location"
+    assert discard_reason(latam, filters, NOW) is None
+    assert discard_reason(unknown, filters, NOW) is None
 
 
-def test_pais_vale_para_presencial_e_nao_para_remoto() -> None:
-    filtros = Filtros(paises=["PT", "DE"])
-    assert motivo_descarte(vaga(modalidade="presencial", pais="US"), filtros, AGORA) == "pais"
-    assert motivo_descarte(vaga(modalidade="hibrido", pais="DE"), filtros, AGORA) is None
-    assert motivo_descarte(vaga(modalidade="remoto", pais="US"), filtros, AGORA) is None
+def test_country_applies_to_onsite_and_not_to_remote() -> None:
+    filters = Filters(countries=["BR"])
+    assert discard_reason(job(work_mode="onsite", country="US"), filters, NOW) == "country"
+    assert discard_reason(job(work_mode="hybrid", country="BR"), filters, NOW) is None
+    assert discard_reason(job(work_mode="remote", country="US"), filters, NOW) is None
 
 
-def test_tipo_de_contrato() -> None:
-    filtros = Filtros(tipos_contrato=[TipoContrato.TEMPO_INTEGRAL])
-    assert motivo_descarte(vaga(tipo_contrato="freelance"), filtros, AGORA) == "tipo_contrato"
-    assert motivo_descarte(vaga(tipo_contrato=None), filtros, AGORA) is None
-
-
-@pytest.mark.parametrize(
-    ("salario", "motivo"),
-    [
-        (Salario(minimo=30_000, maximo=40_000, moeda="EUR", periodo="ano"), "salario"),
-        (Salario(minimo=40_000, maximo=60_000, moeda="EUR", periodo="ano"), None),  # teto passa
-        (Salario(minimo=3_000, maximo=4_000, moeda="EUR", periodo="mes"), "salario"),  # 48k < 54k
-        (Salario(minimo=3_000, maximo=4_500, moeda="EUR", periodo="mes"), None),  # 54k: na margem
-        (Salario(minimo=5_000, maximo=5_500, moeda="EUR", periodo="mes"), None),  # 66k
-        (Salario(minimo=10, maximo=20, moeda="USD", periodo="hora"), None),  # moeda diferente
-        (Salario(minimo=10, maximo=20, moeda="EUR", periodo="hora"), None),  # hora: o LLM avalia
-        (Salario(minimo=10, maximo=20, moeda="EUR", periodo=None), None),  # período desconhecido
-        (None, None),  # sem salário
-    ],
-)
-def test_salario_minimo(salario: Salario | None, motivo: str | None) -> None:
-    filtros = Filtros(salario_minimo=Salario(minimo=60_000, moeda="EUR", periodo="ano"))
-    assert motivo_descarte(vaga(salario=salario), filtros, AGORA) == motivo
-
-
-def test_empresa_bloqueada_ignora_sufixo_e_caixa() -> None:
-    filtros = Filtros(empresas_bloqueadas=["acme"])
-    assert motivo_descarte(vaga(empresa="ACME Inc."), filtros, AGORA) == "empresa_bloqueada"
-    assert motivo_descarte(vaga(empresa="Acme Labs"), filtros, AGORA) is None
-
-
-def test_palavra_bloqueada_so_no_titulo_e_palavra_inteira() -> None:
-    filtros = Filtros(palavras_bloqueadas=["intern", "Estágio"])
-    assert motivo_descarte(vaga(titulo="Cloud Intern"), filtros, AGORA) == "palavra_bloqueada"
-    assert motivo_descarte(vaga(titulo="Estagio em Dados"), filtros, AGORA) == "palavra_bloqueada"
-    assert motivo_descarte(vaga(titulo="International Sales"), filtros, AGORA) is None
-    assert motivo_descarte(vaga(descricao="intern"), filtros, AGORA) is None
+def test_contract_type() -> None:
+    filters = Filters(contract_types=[ContractType.FULL_TIME])
+    assert discard_reason(job(contract_type="freelance"), filters, NOW) == "contract_type"
+    assert discard_reason(job(contract_type=None), filters, NOW) is None
 
 
 @pytest.mark.parametrize(
-    ("texto", "esperado"),
+    ("salary", "reason"),
     [
-        ("Contagem - MG, BR", ["BR"]),  # MG seria Madagascar
-        ("Vitória, ES, Brasil", ["BR"]),  # ES seria Espanha
-        ("Madrid, ES", ["ES"]),  # sem o Brasil explícito, ES continua Espanha
+        (Salary(minimum=30_000, maximum=40_000, currency="EUR", period="year"), "salary"),
+        (Salary(minimum=40_000, maximum=60_000, currency="EUR", period="year"), None),  # max ok
+        (Salary(minimum=3_000, maximum=4_000, currency="EUR", period="month"), "salary"),  # 48k
+        (Salary(minimum=3_000, maximum=4_500, currency="EUR", period="month"), None),  # 54k: margin
+        (Salary(minimum=5_000, maximum=5_500, currency="EUR", period="month"), None),  # 66k
+        (Salary(minimum=10, maximum=20, currency="USD", period="hour"), None),  # other currency
+        (Salary(minimum=10, maximum=20, currency="EUR", period="hour"), None),  # hourly: LLM judges
+        (Salary(minimum=10, maximum=20, currency="EUR", period=None), None),  # unknown period
+        (None, None),  # no salary
     ],
 )
-def test_sigla_de_estado_brasileiro_nao_vira_pais(texto: str, esperado: list[str]) -> None:
-    from job_finder.pipeline.locais import interpretar_local
+def test_min_salary(salary: Salary | None, reason: str | None) -> None:
+    filters = Filters(min_salary=Salary(minimum=60_000, currency="EUR", period="year"))
+    assert discard_reason(job(salary=salary), filters, NOW) == reason
 
-    assert interpretar_local(texto) == esperado
+
+def test_blocked_company_ignores_suffix_and_case() -> None:
+    filters = Filters(blocked_companies=["acme"])
+    assert discard_reason(job(company="ACME Inc."), filters, NOW) == "blocked_company"
+    assert discard_reason(job(company="Acme Labs"), filters, NOW) is None
+
+
+def test_blocked_keyword_only_in_title_and_whole_word() -> None:
+    filters = Filters(blocked_keywords=["intern", "Estágio"])
+    assert discard_reason(job(title="Cloud Intern"), filters, NOW) == "blocked_keyword"
+    assert discard_reason(job(title="Estagio em Dados"), filters, NOW) == "blocked_keyword"
+    assert discard_reason(job(title="International Sales"), filters, NOW) is None
+    assert discard_reason(job(description="intern"), filters, NOW) is None
 
 
 @pytest.mark.parametrize(
-    ("contrato", "mensal", "motivo"),
+    ("text", "expected"),
     [
-        ("tempo_integral", 22_000, None),  # CLT acima de 20k
-        ("tempo_integral", 19_000, None),  # dentro da margem de 10%
-        ("tempo_integral", 17_000, "salario"),
-        ("contrato", 25_000, "salario"),  # PJ abaixo de 30k
-        ("contrato", 32_000, None),
-        (None, 22_000, None),  # sem tipo: usa o mínimo geral (20k)
+        ("Contagem - MG, BR", ["BR"]),  # MG would be Madagascar
+        ("Vitória, ES, Brasil", ["BR"]),  # ES would be Spain
+        ("Madrid, ES", ["ES"]),  # without Brazil spelled out, ES stays Spain
     ],
 )
-def test_salario_minimo_por_tipo_de_contrato(
-    contrato: str | None, mensal: int, motivo: str | None
+def test_brazilian_state_code_is_not_a_country(text: str, expected: list[str]) -> None:
+    assert parse_location(text) == expected
+
+
+@pytest.mark.parametrize(
+    ("contract", "monthly", "reason"),
+    [
+        ("full_time", 22_000, None),  # CLT above 20k
+        ("full_time", 19_000, None),  # within the 10% margin
+        ("full_time", 17_000, "salary"),
+        ("contract", 25_000, "salary"),  # PJ below 30k
+        ("contract", 32_000, None),
+        (None, 22_000, None),  # no type: uses the general minimum (20k)
+    ],
+)
+def test_min_salary_by_contract_type(
+    contract: str | None, monthly: int, reason: str | None
 ) -> None:
-    filtros = Filtros(
-        salario_minimo=Salario(minimo=20_000, moeda="BRL", periodo="mes"),
-        salario_minimo_por_contrato={
-            "tempo_integral": Salario(minimo=20_000, moeda="BRL", periodo="mes"),
-            "contrato": Salario(minimo=30_000, moeda="BRL", periodo="mes"),
+    filters = Filters(
+        min_salary=Salary(minimum=20_000, currency="BRL", period="month"),
+        min_salary_by_contract={
+            "full_time": Salary(minimum=20_000, currency="BRL", period="month"),
+            "contract": Salary(minimum=30_000, currency="BRL", period="month"),
         },
     )
-    salario = Salario(minimo=mensal, maximo=mensal, moeda="BRL", periodo="mes")
-    assert motivo_descarte(vaga(salario=salario, tipo_contrato=contrato), filtros, AGORA) == motivo
+    salary = Salary(minimum=monthly, maximum=monthly, currency="BRL", period="month")
+    assert discard_reason(job(salary=salary, contract_type=contract), filters, NOW) == reason
 
 
-def test_valor_por_hora_nunca_descarta_no_codigo() -> None:
-    filtros = Filtros(
-        salario_minimo_por_contrato={
-            "contrato": Salario(minimo=30_000, moeda="BRL", periodo="mes"),
+def test_hourly_rate_never_discards_in_code() -> None:
+    filters = Filters(
+        min_salary_by_contract={
+            "contract": Salary(minimum=30_000, currency="BRL", period="month"),
         }
     )
-    hora = Salario(minimo=90, maximo=90, moeda="BRL", periodo="hora")
-    assert motivo_descarte(vaga(salario=hora, tipo_contrato="contrato"), filtros, AGORA) is None
-
-
-@pytest.mark.parametrize(
-    ("texto", "esperado"),
-    [
-        ("R$ 150", Salario(minimo=150, maximo=150, moeda="BRL", periodo="hora")),
-        ("R$ 120 a R$ 180 por hora", Salario(minimo=120, maximo=180, moeda="BRL", periodo="hora")),
-        ("R$ 25.000", Salario(minimo=25_000, maximo=25_000, moeda="BRL", periodo="mes")),
-    ],
-)
-def test_salario_em_reais_sem_periodo(texto: str, esperado: Salario) -> None:
-    from job_finder.pipeline.salario import interpretar_salario
-
-    assert interpretar_salario(texto) == esperado
+    hourly = Salary(minimum=90, maximum=90, currency="BRL", period="hour")
+    assert discard_reason(job(salary=hourly, contract_type="contract"), filters, NOW) is None

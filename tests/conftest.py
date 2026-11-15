@@ -6,12 +6,12 @@ import pytest
 from sqlalchemy import Engine
 
 from job_finder.config import Settings, get_settings
-from job_finder.db.session import criar_engine, upgrade
+from job_finder.db.session import make_engine, upgrade
 
 
 @pytest.fixture(autouse=True)
-def _isolar_ambiente(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
-    """Nenhum teste lê o `.env` real nem escreve fora do tmp_path."""
+def _isolate_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
+    """No test reads the real `.env` or writes outside tmp_path."""
     for var in list(os.environ):
         if var.startswith(("JOBFINDER_", "ANTHROPIC_")):
             monkeypatch.delenv(var)
@@ -30,6 +30,6 @@ def db_url(tmp_path: Path) -> str:
 @pytest.fixture
 def engine(db_url: str) -> Iterator[Engine]:
     upgrade(db_url)
-    eng = criar_engine(db_url)
+    eng = make_engine(db_url)
     yield eng
     eng.dispose()

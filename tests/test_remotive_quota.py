@@ -9,10 +9,10 @@ from sqlalchemy import Engine
 
 from job_finder.connectors import base
 from job_finder.connectors.remotive import URL, Remotive
-from job_finder.quota import Quota, QuotaEsgotada
+from job_finder.quota import Quota, QuotaExhausted
 
 FIXTURE = Path(__file__).parent / "fixtures" / "remotive" / "remote_jobs.json"
-HOJE = date(2026, 11, 15)
+TODAY = date(2026, 11, 15)
 
 
 @pytest.fixture
@@ -22,59 +22,59 @@ def api() -> respx.MockRouter:
         yield router
 
 
-def test_remotive_converte_a_resposta(engine: Engine, api: respx.MockRouter) -> None:
-    with base.cliente_http() as http:
-        vagas = Remotive(http).buscar([], Quota(engine, "remotive", 4, HOJE))
+def test_remotive_converts_the_response(engine: Engine, api: respx.MockRouter) -> None:
+    with base.http_client() as http:
+        jobs = Remotive(http).search([], Quota(engine, "remotive", 4, TODAY))
 
-    assert len(vagas) == 6
-    v = next(v for v in vagas if v.id_fonte == "2091137")
-    assert v.fonte == "remotive"
-    assert v.titulo == "Senior Data Engineer"
-    assert v.empresa == "Lemon.io"
-    assert v.local == "LATAM, Europe, USA, Canada, APAC"
-    assert v.modalidade == "remote"
-    assert v.tipo_contrato == "full_time"
-    assert str(v.url).startswith("https://remotive.com/")  # termos: linkar o Remotive
-    assert v.publicada_em == datetime(2026, 11, 11, 18, 39, 59)
-    assert v.descricao and "<" not in v.descricao  # HTML removido
-    assert v.dados_brutos["category"] == "Data and Analytics"
+    assert len(jobs) == 6
+    j = next(j for j in jobs if j.source_id == "2091137")
+    assert j.source == "remotive"
+    assert j.title == "Senior Data Engineer"
+    assert j.company == "Lemon.io"
+    assert j.location == "LATAM, Europe, USA, Canada, APAC"
+    assert j.work_mode == "remote"
+    assert j.contract_type == "full_time"
+    assert str(j.url).startswith("https://remotive.com/")  # terms: link to Remotive
+    assert j.posted_at == datetime(2026, 11, 11, 18, 39, 59)
+    assert j.description and "<" not in j.description  # HTML stripped
+    assert j.raw_data["category"] == "Data and Analytics"
 
-    sem_empresa_com_espaco = next(v for v in vagas if v.id_fonte == "1680495")
-    assert sem_empresa_com_espaco.empresa == "Coalition Technologies"
+    padded_company = next(j for j in jobs if j.source_id == "1680495")
+    assert padded_company.company == "Coalition Technologies"
 
 
-def test_remotive_envia_user_agent_e_consome_quota(engine: Engine, api: respx.MockRouter) -> None:
-    quota = Quota(engine, "remotive", 4, HOJE)
-    with base.cliente_http() as http:
-        Remotive(http).buscar([], quota)
+def test_remotive_sends_user_agent_and_uses_quota(engine: Engine, api: respx.MockRouter) -> None:
+    quota = Quota(engine, "remotive", 4, TODAY)
+    with base.http_client() as http:
+        Remotive(http).search([], quota)
     assert api.calls.last.request.headers["User-Agent"].startswith("job-finder/")
-    assert quota.usadas_hoje() == 1
+    assert quota.used_today() == 1
 
 
-def test_remotive_respeita_a_quota(engine: Engine, api: respx.MockRouter) -> None:
-    quota = Quota(engine, "remotive", 1, HOJE)
-    quota.consumir()
-    with base.cliente_http() as http, pytest.raises(QuotaEsgotada):
-        Remotive(http).buscar([], quota)
-    assert not api.calls  # nem chegou a chamar a API
+def test_remotive_respects_the_quota(engine: Engine, api: respx.MockRouter) -> None:
+    quota = Quota(engine, "remotive", 1, TODAY)
+    quota.consume()
+    with base.http_client() as http, pytest.raises(QuotaExhausted):
+        Remotive(http).search([], quota)
+    assert not api.calls  # never reached the API
 
 
-def test_quota_por_dia_e_por_conector(engine: Engine) -> None:
-    Quota(engine, "a", 2, HOJE).consumir()
-    Quota(engine, "a", 2, HOJE).consumir()
-    with pytest.raises(QuotaEsgotada):
-        Quota(engine, "a", 2, HOJE).consumir()
-    assert Quota(engine, "b", 2, HOJE).disponivel() == 2
-    assert Quota(engine, "a", 2, date(2026, 11, 16)).disponivel() == 2
-    assert Quota(engine, "a", None, HOJE).disponivel() is None
+def test_quota_per_day_and_per_connector(engine: Engine) -> None:
+    Quota(engine, "a", 2, TODAY).consume()
+    Quota(engine, "a", 2, TODAY).consume()
+    with pytest.raises(QuotaExhausted):
+        Quota(engine, "a", 2, TODAY).consume()
+    assert Quota(engine, "b", 2, TODAY).available() == 2
+    assert Quota(engine, "a", 2, date(2026, 11, 16)).available() == 2
+    assert Quota(engine, "a", None, TODAY).available() is None
 
 
-def test_registro_de_conectores() -> None:
-    assert "remotive" in base.disponiveis()
-    with pytest.raises(ValueError, match="desconhecido"), base.cliente_http() as http:
-        base.criar("nao-existe", http)
+def test_connector_registry() -> None:
+    assert "remotive" in base.available()
+    with pytest.raises(ValueError, match="unknown"), base.http_client() as http:
+        base.create("does-not-exist", http)
 
 
-def test_horario_da_quota_usa_a_data_utc() -> None:
-    # A rodada passa agora.date() com agora em UTC; a quota é diária em UTC.
-    assert datetime(2026, 11, 15, 23, 30, tzinfo=UTC).date() == HOJE
+def test_quota_day_uses_the_utc_date() -> None:
+    # The run passes now.date() with now in UTC; the quota is daily in UTC.
+    assert datetime(2026, 11, 15, 23, 30, tzinfo=UTC).date() == TODAY

@@ -1,4 +1,4 @@
-"""Pipeline de ponta a ponta com conectores falsos (sem rede)."""
+"""End-to-end pipeline with fake connectors (no network)."""
 
 import json
 from collections.abc import Sequence
@@ -14,225 +14,225 @@ from typer.testing import CliRunner
 from job_finder.cli import app as cli_app
 from job_finder.connectors.remotive import URL
 from job_finder.db import repo
-from job_finder.db.models import ExecucaoDB, MatchDB, VagaDB, VagaFonteDB
-from job_finder.db.session import sessao, upgrade
-from job_finder.domain import Filtros, Perfil, Query, StatusMatch, VagaBruta
-from job_finder.pipeline.run import ResumoRodada, executar_rodada
+from job_finder.db.models import JobDB, JobSourceDB, MatchDB, RunDB
+from job_finder.db.session import session, upgrade
+from job_finder.domain import Filters, MatchStatus, Profile, Query, RawJob
+from job_finder.pipeline.run import RunSummary, execute_run
 from job_finder.quota import Quota
 
-AGORA = datetime(2026, 11, 15, 12, tzinfo=UTC)
+NOW = datetime(2026, 11, 15, 12, tzinfo=UTC)
 
 
-class Falso:
-    limite_diario: int | None = None
+class Fake:
+    daily_limit: int | None = None
 
-    def __init__(self, nome: str, vagas: list[VagaBruta]) -> None:
-        self.nome = nome
-        self.vagas = vagas
-        self.queries_recebidas: list[Query] = []
+    def __init__(self, name: str, jobs: list[RawJob]) -> None:
+        self.name = name
+        self.jobs = jobs
+        self.received_queries: list[Query] = []
 
-    def buscar(self, queries: Sequence[Query], quota: Quota) -> list[VagaBruta]:
-        quota.consumir()
-        self.queries_recebidas = list(queries)
-        return self.vagas
-
-
-class Quebrado:
-    nome = "quebrado"
-    limite_diario: int | None = None
-
-    def buscar(self, queries: Sequence[Query], quota: Quota) -> list[VagaBruta]:
-        raise httpx.ConnectError("sem rede")
+    def search(self, queries: Sequence[Query], quota: Quota) -> list[RawJob]:
+        quota.consume()
+        self.received_queries = list(queries)
+        return self.jobs
 
 
-def bruta(fonte: str, id_fonte: str, **kw: object) -> VagaBruta:
+class Broken:
+    name = "broken"
+    daily_limit: int | None = None
+
+    def search(self, queries: Sequence[Query], quota: Quota) -> list[RawJob]:
+        raise httpx.ConnectError("no network")
+
+
+def raw(source: str, source_id: str, **kw: object) -> RawJob:
     base: dict[str, object] = {
-        "fonte": fonte,
-        "id_fonte": id_fonte,
-        "titulo": "Cloud Architect",
-        "empresa": "Acme",
-        "local": "Europe",
-        "modalidade": "remote",
-        "url": f"https://{fonte}.example/{id_fonte}",
-        "publicada_em": AGORA - timedelta(days=1),
+        "source": source,
+        "source_id": source_id,
+        "title": "Cloud Architect",
+        "company": "Acme",
+        "location": "Europe",
+        "work_mode": "remote",
+        "url": f"https://{source}.example/{source_id}",
+        "posted_at": NOW - timedelta(days=1),
     }
-    return VagaBruta.model_validate(base | kw)
+    return RawJob.model_validate(base | kw)
 
 
-def criar_perfis(engine: Engine) -> None:
-    with sessao(engine) as s:
-        repo.salvar_perfil(
+def create_profiles(engine: Engine) -> None:
+    with session(engine) as s:
+        repo.save_profile(
             s,
-            Perfil(
-                nome="daniel",
-                queries=[Query(termo="Cloud Architect"), Query(termo="DevOps", ativa=False)],
-                filtros=Filtros(remoto_a_partir_de=["PT"]),
+            Profile(
+                name="daniel",
+                queries=[Query(term="Cloud Architect"), Query(term="DevOps", active=False)],
+                filters=Filters(remote_from=["PT"]),
             ),
         )
-        repo.salvar_perfil(
+        repo.save_profile(
             s,
-            Perfil(
-                nome="esposa",
-                queries=[Query(termo="Brand Marketing"), Query(termo="cloud architect")],
-                filtros=Filtros(remoto_a_partir_de=["BR"], palavras_bloqueadas=["architect"]),
+            Profile(
+                name="partner",
+                queries=[Query(term="Brand Marketing"), Query(term="cloud architect")],
+                filters=Filters(remote_from=["BR"], blocked_keywords=["architect"]),
             ),
         )
 
 
-def rodar(engine: Engine, conectores: Sequence[object]) -> ResumoRodada:
-    with sessao(engine) as s:
-        return executar_rodada(s, engine, conectores, repo.listar_perfis(s), AGORA)  # type: ignore[arg-type]
+def run(engine: Engine, connectors: Sequence[object]) -> RunSummary:
+    with session(engine) as s:
+        return execute_run(s, engine, connectors, repo.list_profiles(s), NOW)  # type: ignore[arg-type]
 
 
-def contar(engine: Engine, modelo: type) -> int:
-    with sessao(engine) as s:
-        return int(s.scalar(select(func.count()).select_from(modelo)) or 0)
+def count(engine: Engine, model: type) -> int:
+    with session(engine) as s:
+        return int(s.scalar(select(func.count()).select_from(model)) or 0)
 
 
-def test_rodada_completa(engine: Engine) -> None:
-    criar_perfis(engine)
-    fonte_a = Falso(
+def test_full_run(engine: Engine) -> None:
+    create_profiles(engine)
+    source_a = Fake(
         "a",
         [
-            bruta("a", "1"),
-            bruta("a", "2", titulo="Data Engineer", local="USA"),
-            bruta("a", "3", titulo="Old Job", publicada_em=AGORA - timedelta(days=60)),
+            raw("a", "1"),
+            raw("a", "2", title="Data Engineer", location="USA"),
+            raw("a", "3", title="Old Job", posted_at=NOW - timedelta(days=60)),
         ],
     )
-    # Mesma vaga "a/1" anunciada por outra fonte, com título e empresa escritos diferente.
-    fonte_b = Falso("b", [bruta("b", "x", titulo="Cloud Architect (m/f/d)", empresa="ACME GmbH")])
+    # The same job "a/1" posted by another source, with title and company spelled differently.
+    source_b = Fake("b", [raw("b", "x", title="Cloud Architect (m/f/d)", company="ACME GmbH")])
 
-    resumo = rodar(engine, [fonte_a, fonte_b])
+    summary = run(engine, [source_a, source_b])
 
-    assert resumo.erros == []
-    assert resumo.coletadas == 4
-    assert resumo.novas == 3  # a/1 e b/x são a mesma vaga
-    assert contar(engine, VagaDB) == 3
-    assert contar(engine, VagaFonteDB) == 4
+    assert summary.errors == []
+    assert summary.collected == 4
+    assert summary.new == 3  # a/1 and b/x are the same job
+    assert count(engine, JobDB) == 3
+    assert count(engine, JobSourceDB) == 4
 
-    # Queries ativas, sem repetição (caixa diferente conta como a mesma).
-    assert sorted(q.termo for q in fonte_a.queries_recebidas) == [
+    # Active queries, deduplicated (a different case counts as the same).
+    assert sorted(q.term for q in source_a.received_queries) == [
         "Brand Marketing",
         "Cloud Architect",
     ]
 
-    daniel, esposa = resumo.perfis
-    assert [v.titulo for v in daniel.aprovadas] == ["Cloud Architect"]
-    assert daniel.descartes == {"local": 1}  # "USA" não aceita quem mora em PT
-    assert esposa.aprovadas == []
-    assert esposa.descartes == {"local": 2}  # Europa e EUA não aceitam quem mora no BR
-    # A vaga de 60 dias nem entra como candidata.
-    assert daniel.avaliadas == 2
+    daniel, partner = summary.profiles
+    assert [j.title for j in daniel.approved] == ["Cloud Architect"]
+    assert daniel.discards == {"location": 1}  # "USA" does not accept residents of PT
+    assert partner.approved == []
+    assert partner.discards == {"location": 2}  # Europe and the US do not accept residents of BR
+    # The 60-day-old job is not even a candidate.
+    assert daniel.evaluated == 2
 
-    with sessao(engine) as s:
+    with session(engine) as s:
         matches = s.scalars(select(MatchDB)).all()
-        assert [(m.perfil.nome, m.status) for m in matches] == [("daniel", StatusMatch.PENDENTE)]
-        execucao = s.scalars(select(ExecucaoDB)).one()
-        assert (execucao.status, execucao.vagas_novas, execucao.matches_novos) == ("ok", 3, 1)
-        assert execucao.finalizada_em is not None
+        assert [(m.profile.name, m.status) for m in matches] == [("daniel", MatchStatus.PENDING)]
+        run_row = s.scalars(select(RunDB)).one()
+        assert (run_row.status, run_row.jobs_new, run_row.matches_new) == ("ok", 3, 1)
+        assert run_row.finished_at is not None
 
 
-def test_segunda_rodada_nao_duplica(engine: Engine) -> None:
-    criar_perfis(engine)
-    fonte = Falso("a", [bruta("a", "1"), bruta("a", "2", titulo="SRE")])
-    rodar(engine, [fonte])
-    resumo = rodar(engine, [fonte])
+def test_second_run_does_not_duplicate(engine: Engine) -> None:
+    create_profiles(engine)
+    source = Fake("a", [raw("a", "1"), raw("a", "2", title="SRE")])
+    run(engine, [source])
+    summary = run(engine, [source])
 
-    assert resumo.novas == 0
-    assert contar(engine, VagaDB) == 2
-    assert contar(engine, VagaFonteDB) == 2
-    assert contar(engine, MatchDB) == 2  # um match por vaga para o daniel, sem repetir
-    assert resumo.perfis[0].avaliadas == 0
-
-
-def test_fonte_quebrada_nao_derruba_a_rodada(engine: Engine) -> None:
-    criar_perfis(engine)
-    resumo = rodar(engine, [Quebrado(), Falso("a", [bruta("a", "1")])])
-
-    assert resumo.coletadas == 1
-    assert resumo.erros == ["quebrado: ConnectError: sem rede"]
-    with sessao(engine) as s:
-        assert s.scalars(select(ExecucaoDB)).one().status == "parcial"
+    assert summary.new == 0
+    assert count(engine, JobDB) == 2
+    assert count(engine, JobSourceDB) == 2
+    assert count(engine, MatchDB) == 2  # one match per job for daniel, no repeats
+    assert summary.profiles[0].evaluated == 0
 
 
-def test_quota_esgotada_vira_aviso(engine: Engine) -> None:
-    criar_perfis(engine)
-    fonte = Falso("a", [bruta("a", "1")])
-    fonte.limite_diario = 1
-    Quota(engine, "a", 1, AGORA.date()).consumir()
+def test_broken_source_does_not_take_down_the_run(engine: Engine) -> None:
+    create_profiles(engine)
+    summary = run(engine, [Broken(), Fake("a", [raw("a", "1")])])
 
-    resumo = rodar(engine, [fonte])
-    assert resumo.coletadas == 0
-    assert resumo.erros == ["quota de a esgotada (1/dia)"]
-    with sessao(engine) as s:
-        assert s.scalars(select(ExecucaoDB)).one().status == "erro"
+    assert summary.collected == 1
+    assert summary.errors == ["broken: ConnectError: no network"]
+    with session(engine) as s:
+        assert s.scalars(select(RunDB)).one().status == "partial"
+
+
+def test_exhausted_quota_becomes_a_warning(engine: Engine) -> None:
+    create_profiles(engine)
+    source = Fake("a", [raw("a", "1")])
+    source.daily_limit = 1
+    Quota(engine, "a", 1, NOW.date()).consume()
+
+    summary = run(engine, [source])
+    assert summary.collected == 0
+    assert summary.errors == ["a quota exhausted (1/day)"]
+    with session(engine) as s:
+        assert s.scalars(select(RunDB)).one().status == "error"
 
 
 # --- CLI ----------------------------------------------------------------------
 
 FIXTURE = Path(__file__).parent / "fixtures" / "remotive" / "remote_jobs.json"
-EXEMPLO = Path(__file__).parents[1] / "perfis" / "exemplo.yaml"
+EXAMPLE = Path(__file__).parents[1] / "profiles" / "example.yaml"
 
 
 @pytest.fixture
 def cli_db(tmp_path: Path) -> Engine:
     from job_finder.config import get_settings
-    from job_finder.db.session import criar_engine
+    from job_finder.db.session import make_engine
 
     url = get_settings().resolved_database_url
     upgrade(url)
-    return criar_engine(url)
+    return make_engine(url)
 
 
 @pytest.fixture
 def remotive_api() -> respx.MockRouter:
-    dados = json.loads(FIXTURE.read_text())
-    # Datas recentes para não caírem no filtro de idade.
-    for job in dados["jobs"]:
+    data = json.loads(FIXTURE.read_text())
+    # Recent dates so they pass the age filter.
+    for job in data["jobs"]:
         job["publication_date"] = (datetime.now(UTC) - timedelta(days=1)).strftime(
             "%Y-%m-%dT%H:%M:%S"
         )
     with respx.mock() as router:
-        router.get(URL).mock(return_value=httpx.Response(200, json=dados))
+        router.get(URL).mock(return_value=httpx.Response(200, json=data))
         yield router
 
 
-def test_cli_dry_run_nao_grava_mas_conta_quota(
+def test_cli_dry_run_writes_nothing_but_uses_quota(
     cli_db: Engine, remotive_api: respx.MockRouter
 ) -> None:
     runner = CliRunner()
-    assert runner.invoke(cli_app, ["perfil", "carregar", str(EXEMPLO)]).exit_code == 0
+    assert runner.invoke(cli_app, ["profile", "load", str(EXAMPLE)]).exit_code == 0
 
-    resultado = runner.invoke(cli_app, ["run", "--dry-run"])
-    assert resultado.exit_code == 0, resultado.output
-    assert "Coletadas: 6" in resultado.output
-    assert "dry-run" in resultado.output
-    assert contar(cli_db, VagaDB) == 0
-    assert contar(cli_db, ExecucaoDB) == 0
-    # A chamada HTTP aconteceu, então conta na quota mesmo no dry-run.
-    assert Quota(cli_db, "remotive", 4, datetime.now(UTC).date()).usadas_hoje() == 1
+    result = runner.invoke(cli_app, ["run", "--dry-run"])
+    assert result.exit_code == 0, result.output
+    assert "Collected: 6" in result.output
+    assert "dry run" in result.output
+    assert count(cli_db, JobDB) == 0
+    assert count(cli_db, RunDB) == 0
+    # The HTTP call happened, so it counts against the quota even in a dry run.
+    assert Quota(cli_db, "remotive", 4, datetime.now(UTC).date()).used_today() == 1
 
 
-def test_cli_run_grava_e_mostra_aprovadas(cli_db: Engine, remotive_api: respx.MockRouter) -> None:
+def test_cli_run_writes_and_shows_approved(cli_db: Engine, remotive_api: respx.MockRouter) -> None:
     runner = CliRunner()
-    runner.invoke(cli_app, ["perfil", "carregar", str(EXEMPLO)])
-    resultado = runner.invoke(cli_app, ["run", "--perfil", "exemplo"])
+    runner.invoke(cli_app, ["profile", "load", str(EXAMPLE)])
+    result = runner.invoke(cli_app, ["run", "--profile", "example"])
 
-    assert resultado.exit_code == 0, resultado.output
-    assert contar(cli_db, VagaDB) == 6
-    # Perfil exemplo: remoto a partir de PT. As duas vagas restritas a EUA/Canadá caem
-    # no filtro de local; as quatro Worldwide/Europa passam (salário em USD não é
-    # comparado com o mínimo em EUR, porque não há câmbio na fase 1).
-    assert "4 de 6 passaram nos filtros" in resultado.output
-    assert "local: 2" in resultado.output
-    with sessao(cli_db) as s:
-        titulos = set(s.scalars(select(VagaDB.titulo).join(MatchDB)))
-    assert "Senior Data Engineer" in titulos
-    assert "Customer Service Representative" not in titulos
-    assert "Tech Lead Full-Stack Rails Engineer" not in titulos
+    assert result.exit_code == 0, result.output
+    assert count(cli_db, JobDB) == 6
+    # Example profile: remote from PT. The two jobs restricted to the US/Canada fail the
+    # location filter; the four Worldwide/Europe ones pass (a USD salary is not compared
+    # with the EUR minimum, since there is no currency conversion).
+    assert "4 of 6 passed the filters" in result.output
+    assert "location: 2" in result.output
+    with session(cli_db) as s:
+        titles = set(s.scalars(select(JobDB.title).join(MatchDB)))
+    assert "Senior Data Engineer" in titles
+    assert "Customer Service Representative" not in titles
+    assert "Tech Lead Full-Stack Rails Engineer" not in titles
 
 
-def test_cli_run_sem_perfis_falha_com_mensagem(cli_db: Engine) -> None:
-    resultado = CliRunner().invoke(cli_app, ["run"])
-    assert resultado.exit_code != 0
-    assert "nenhum perfil" in resultado.output
+def test_cli_run_without_profiles_fails_with_a_message(cli_db: Engine) -> None:
+    result = CliRunner().invoke(cli_app, ["run"])
+    assert result.exit_code != 0
+    assert "no profile" in result.output
