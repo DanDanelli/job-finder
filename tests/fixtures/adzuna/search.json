@@ -1,0 +1,39 @@
+{
+ "count": 3,
+ "mean": 85000,
+ "results": [
+  {
+   "id": "5012345678",
+   "title": "Coordenador de <strong>Marketing</strong>",
+   "company": {"display_name": "Acme Moda"},
+   "location": {"display_name": "São Paulo, São Paulo", "area": ["Brasil", "São Paulo", "São Paulo"]},
+   "description": "Responsável por branding e campanhas de coleção…",
+   "redirect_url": "https://www.adzuna.com.br/land/ad/5012345678?se=x&v=y",
+   "created": "2026-11-14T10:00:00Z",
+   "salary_min": 96000,
+   "salary_max": 120000,
+   "salary_is_predicted": "0",
+   "contract_type": "permanent",
+   "contract_time": "full_time",
+   "category": {"label": "Marketing Jobs", "tag": "marketing-jobs"}
+  },
+  {
+   "id": "5012345679",
+   "title": "Analista de Marca",
+   "company": {"display_name": "Beta"},
+   "location": {"display_name": "Brasil", "area": ["Brasil"]},
+   "description": "Gestão de marca.",
+   "redirect_url": "https://www.adzuna.com.br/land/ad/5012345679",
+   "created": "2026-11-13T08:30:00Z",
+   "salary_min": 70000,
+   "salary_max": 70000,
+   "salary_is_predicted": "1",
+   "contract_time": "full_time"
+  },
+  {
+   "id": "5012345680",
+   "title": "",
+   "redirect_url": "https://www.adzuna.com.br/land/ad/5012345680"
+  }
+ ]
+}

@@ -384,3 +384,28 @@ def test_long_country_lists_are_shortened() -> None:
     )
     assert _short_places("São Paulo, SP, BR") == "São Paulo, SP, BR"
     assert _short_places(None) is None
+
+
+def test_adzuna_credit_links_to_adzuna() -> None:
+    from job_finder.telegram.digest import DigestItem, format_job
+
+    item = DigestItem(
+        match_id=1,
+        score=70,
+        title="Brand Manager",
+        company=None,
+        work_mode="onsite",
+        location_text=None,
+        salary_range=None,
+        salary_period=None,
+        strengths=[],
+        gaps=[],
+        dealbreakers=[],
+        summary=None,
+        url="https://www.adzuna.com.br/land/ad/1",
+        sources=["Adzuna", "Remotive"],
+        source_links={"Adzuna": "https://www.adzuna.com.br"},
+    )
+    assert format_job(item, "en").endswith(
+        'via <a href="https://www.adzuna.com.br">Adzuna</a>, Remotive'
+    )

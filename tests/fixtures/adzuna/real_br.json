@@ -1,0 +1,87 @@
+{
+ "results": [
+  {
+   "location": {
+    "area": [
+     "Brasil",
+     "Sudeste",
+     "Estado de São Paulo",
+     "São Paulo"
+    ],
+    "display_name": "São Paulo, Estado de São Paulo",
+    "__CLASS__": "Adzuna::API::Response::Location"
+   },
+   "category": {
+    "__CLASS__": "Adzuna::API::Response::Category",
+    "label": "Unknown",
+    "tag": "unknown"
+   },
+   "salary_is_predicted": "0",
+   "id": "5966621735",
+   "created": "2026-11-15T04:00:09Z",
+   "__CLASS__": "Adzuna::API::Response::Job",
+   "title": "Marketing Assistant",
+   "description": "No Relocation Assistance Offered Job Number 177408 - Sao Paulo, Sao Paulo, Brazil Who We Are Colgate-Palmolive Company is a global consumer products company operating in over 200 countries specialisin",
+   "redirect_url": "https://www.adzuna.com.br/details/5966621735",
+   "company": {
+    "__CLASS__": "Adzuna::API::Response::Company",
+    "display_name": "Colgate-Palmolive Company"
+   }
+  },
+  {
+   "created": "2026-11-14T14:55:52Z",
+   "id": "5966167629",
+   "location": {
+    "area": [
+     "Brasil",
+     "Sudeste",
+     "Estado de São Paulo",
+     "São Paulo"
+    ],
+    "display_name": "São Paulo, Estado de São Paulo",
+    "__CLASS__": "Adzuna::API::Response::Location"
+   },
+   "category": {
+    "tag": "pr-advertising-marketing-jobs",
+    "label": "Vagas em Propaganda e Marketing",
+    "__CLASS__": "Adzuna::API::Response::Category"
+   },
+   "salary_is_predicted": "0",
+   "company": {
+    "display_name": "OpenAI",
+    "__CLASS__": "Adzuna::API::Response::Company"
+   },
+   "__CLASS__": "Adzuna::API::Response::Job",
+   "title": "Integrated Marketing Manager - Consumer & Brand, LATAM",
+   "description": "About the Team OpenAI’s LATAM Marketing team helps people understand how AI can benefit their lives and put that value into practice. We connect global product innovation with local consumer needs, cu",
+   "contract_time": "full_time",
+   "redirect_url": "https://www.adzuna.com.br/details/5966167629"
+  },
+  {
+   "company": {
+    "display_name": "Devoted Studios",
+    "__CLASS__": "Adzuna::API::Response::Company"
+   },
+   "redirect_url": "https://www.adzuna.com.br/details/5964988564",
+   "contract_time": "full_time",
+   "title": "Social Media Manager",
+   "description": "Devoted Studios is a globally remote development company specializing in Co-development, Porting, and End-to-End Art Production for the global gaming industry. We collaborate across time zones to supp",
+   "__CLASS__": "Adzuna::API::Response::Job",
+   "id": "5964988564",
+   "created": "2026-11-13T19:23:57Z",
+   "salary_is_predicted": "0",
+   "category": {
+    "label": "Vagas em Propaganda e Marketing",
+    "__CLASS__": "Adzuna::API::Response::Category",
+    "tag": "pr-advertising-marketing-jobs"
+   },
+   "location": {
+    "__CLASS__": "Adzuna::API::Response::Location",
+    "area": [
+     "Brasil"
+    ],
+    "display_name": "Brasil"
+   }
+  }
+ ]
+}

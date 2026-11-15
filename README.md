@@ -12,7 +12,7 @@ on a Raspberry Pi.
 1. `job-finder profile import cv.pdf -p <name>` reads the CV with Claude and
    fills in the profile (skills, roles, suggested search queries).
 2. Each run collects jobs from the enabled sources (Remotive, Remote OK,
-   Himalayas, JSearch),
+   Himalayas, JSearch, Adzuna),
    normalizes and deduplicates them, applies the profile's hard filters and
    ranks the rest with BM25.
 3. The best candidates are scored by Claude (fit 0-100, strengths, gaps,
@@ -57,5 +57,8 @@ Each connector follows its source's terms, recorded in its docstring:
   limit); jobs open through Himalayas' application link, credit Himalayas, and
   expired jobs are dropped. Jobs are not passed on to third parties.
 - **JSearch:** stays within the plan's monthly quota.
+- **Adzuna:** personal job search only; every job credits Adzuna with a link,
+  and Adzuna's salary estimates are not shown. Its key travels in the URL, so
+  errors are reported without it.
 
 Sources whose terms forbid aggregation are not supported.

@@ -21,9 +21,15 @@ from job_finder.i18n import t
 
 log = logging.getLogger(__name__)
 
-# Display names of the sources. Remotive's, Remote OK's and Himalayas' terms ask to
-# credit them as the source.
-SOURCE_NAMES = {"remotive": "Remotive", "remoteok": "Remote OK", "himalayas": "Himalayas"}
+# Display names of the sources. Remotive's, Remote OK's, Himalayas' and Adzuna's terms
+# ask to credit them as the source; Adzuna's, with a link to Adzuna.
+SOURCE_NAMES = {
+    "remotive": "Remotive",
+    "remoteok": "Remote OK",
+    "himalayas": "Himalayas",
+    "adzuna": "Adzuna",
+}
+SOURCE_LINKS = {"adzuna": "https://www.adzuna.co.uk"}  # default when the job has no site
 WORK_MODES = {"remote", "hybrid", "onsite"}
 PERIODS = {"year", "month", "hour"}
 
@@ -57,6 +63,8 @@ class DigestItem:
     summary: str | None
     url: str
     sources: list[str]
+    # Source name -> link to show on it (terms that ask for a linked credit).
+    source_links: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -109,6 +117,11 @@ def digest_item(m: MatchDB) -> DigestItem:
         summary=m.summary,
         url=m.job.url,
         sources=sorted({n for s in m.job.sources if (n := _source_name(s))}),
+        source_links={
+            SOURCE_NAMES[s.source]: (s.raw_data or {}).get("site") or SOURCE_LINKS[s.source]
+            for s in m.job.sources
+            if s.source in SOURCE_LINKS
+        },
     )
 
 
@@ -202,8 +215,12 @@ def format_job(item: DigestItem, lang: str) -> str:
     if item.summary:
         lines.append(f"<i>{esc(item.summary)}</i>")
     if item.sources:
-        lines.append(f"via {esc(', '.join(item.sources))}")
+        lines.append("via " + ", ".join(_credit(n, item.source_links.get(n)) for n in item.sources))
     return "\n".join(lines)
+
+
+def _credit(name: str, link: str | None) -> str:
+    return f'<a href="{html.escape(link)}">{esc(name)}</a>' if link else esc(name)
 
 
 def job_buttons(match_id: int, url: str, lang: str, status: str | None = None) -> list[Button]:

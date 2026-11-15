@@ -77,6 +77,15 @@ class Settings(BaseSettings):
     himalayas_searches_per_run: int = Field(default=5, ge=1)
     himalayas_daily_limit: int | None = 20
 
+    # Adzuna, keys from developer.adzuna.com (both required).
+    adzuna_app_id: SecretStr | None = None
+    adzuna_app_key: SecretStr | None = None
+    adzuna_countries: list[str] = ["br"]  # for queries with no country
+    adzuna_searches_per_run: int = Field(default=4, ge=1)
+    adzuna_daily_limit: int | None = 10
+    adzuna_monthly_limit: int | None = 250
+    adzuna_max_days_old: int = Field(default=7, ge=1)
+
     @property
     def resolved_database_url(self) -> str:
         """Database URL; by default a SQLite file inside `data_dir`."""
