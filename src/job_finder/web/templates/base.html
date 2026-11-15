@@ -3,7 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="referrer" content="no-referrer">
+  <!-- same-origin, not no-referrer: with no-referrer browsers send "Origin: null" on
+       form posts, which the CSRF check refuses. External links carry rel="noreferrer". -->
+  <meta name="referrer" content="same-origin">
   <title>{% block title %}Job Finder{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>

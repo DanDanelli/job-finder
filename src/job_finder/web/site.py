@@ -6,6 +6,7 @@ Protection:
 - POSTs from another origin are refused (CSRF), on top of SameSite.
 """
 
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,6 +28,7 @@ from job_finder.i18n import t
 from job_finder.telegram.digest import PERIODS, WORK_MODES, short_places
 from job_finder.web import auth, data, forms
 
+log = logging.getLogger(__name__)
 HERE = Path(__file__).parent
 COOKIE = "jf_session"
 SCORE_STEPS = (0, 50, 60, 70, 80)
@@ -37,6 +39,12 @@ class LoginRequired(Exception):
 
 
 def _same_origin(request: Request) -> bool:
+    """Modern browsers say where a request comes from in Sec-Fetch-Site; that is the
+    first check. Otherwise the Origin header must match the host (directly or as the
+    proxy forwarded it). "Origin: null" (opaque origins, sandboxed frames) is refused."""
+    site = request.headers.get("sec-fetch-site")
+    if site is not None:
+        return site in ("same-origin", "none")
     origin = request.headers.get("origin")
     if origin is None:
         return True  # not a browser form (or a very old browser): SameSite still applies
@@ -47,6 +55,14 @@ def _same_origin(request: Request) -> bool:
 class OriginCheck(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         if request.method == "POST" and not _same_origin(request):
+            log.warning(
+                "refused POST %s: sec-fetch-site=%s origin=%s host=%s forwarded-host=%s",
+                request.url.path,
+                request.headers.get("sec-fetch-site"),
+                request.headers.get("origin"),
+                request.headers.get("host"),
+                request.headers.get("x-forwarded-host"),
+            )
             return Response("cross-origin request refused", status_code=403)
         return await call_next(request)
 

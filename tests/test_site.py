@@ -197,6 +197,30 @@ def test_cross_origin_posts_are_refused(engine: Engine, client: TestClient) -> N
     assert same.status_code == 303
 
 
+@pytest.mark.parametrize(
+    ("headers", "status"),
+    [
+        # what Safari/Chrome send for a form on the page itself, behind tailscale serve
+        ({"Sec-Fetch-Site": "same-origin", "Origin": "https://pi.ts.net:8443"}, 303),
+        ({"Sec-Fetch-Site": "none"}, 303),  # typed or bookmarked
+        ({"Sec-Fetch-Site": "cross-site", "Origin": "http://testserver"}, 403),
+        ({"Sec-Fetch-Site": "same-site"}, 403),  # another service on the same tailnet name
+        ({"Origin": "null"}, 403),
+    ],
+)
+def test_fetch_metadata(
+    engine: Engine, client: TestClient, headers: dict[str, str], status: int
+) -> None:
+    add_profile(engine, "daniel")
+    r = client.post("/login", data={"username": "daniel", "password": PASSWORD}, headers=headers)
+    assert r.status_code == status
+
+
+def test_pages_do_not_make_browsers_send_a_null_origin(client: TestClient) -> None:
+    page = client.get("/login").text
+    assert 'content="no-referrer"' not in page and 'content="same-origin"' in page
+
+
 def test_proxy_forwarded_host_counts_as_same_origin(engine: Engine, client: TestClient) -> None:
     add_profile(engine, "daniel")
     r = client.post(
