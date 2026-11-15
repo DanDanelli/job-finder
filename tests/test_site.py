@@ -435,3 +435,79 @@ def test_amounts(text: str, value: float) -> None:
 def test_country_parsing() -> None:
     assert forms.parse_countries("br, Portugal; Estados Unidos") == (["BR", "PT", "US"], [])
     assert forms.parse_countries("LATAM, xx") == ([], ["LATAM", "xx"])
+
+
+# --- CLI ------------------------------------------------------------------------
+
+
+def _password_hash(engine: Engine, name: str) -> str | None:
+    with session(engine) as s:
+        db = repo.find_profile(s, name)
+        assert db is not None
+        return db.password_hash
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"{PASSWORD}\n",
+        f"{PASSWORD}\r\n",  # line ending through a TTY chain
+        f"\x1b[200~{PASSWORD}\x1b[201~\n",  # bracketed paste
+    ],
+)
+def test_cli_password_from_stdin(engine: Engine, db_url: str, line: str) -> None:
+    from typer.testing import CliRunner
+
+    from job_finder.cli import app
+
+    add_profile(engine, "daniel", password=None)
+    with session(engine) as s:
+        p = repo.find_profile(s, "daniel")
+        assert p is not None
+        s.add(SessionDB(token_hash="x" * 64, profile_id=p.id, expires_at=NOW + timedelta(days=1)))
+    result = CliRunner().invoke(
+        app,
+        ["profile", "password", "daniel", "--stdin"],
+        input=line,
+        env={"JOBFINDER_DATABASE_URL": db_url},
+    )
+    assert result.exit_code == 0, result.output
+    assert PASSWORD not in result.output
+    assert auth.verify_password(PASSWORD, _password_hash(engine, "daniel"))
+    with session(engine) as s:
+        assert s.scalars(select(SessionDB)).all() == []  # open sessions signed out
+
+
+def test_cli_password_prompt_cleans_and_compares(engine: Engine, db_url: str) -> None:
+    from typer.testing import CliRunner
+
+    from job_finder.cli import app
+
+    add_profile(engine, "daniel", password=None)
+    runner = CliRunner()
+    env = {"JOBFINDER_DATABASE_URL": db_url}
+    pasted_then_typed = f"\x1b[200~{PASSWORD}\x1b[201~\n{PASSWORD}\n"
+    ok = runner.invoke(app, ["profile", "password", "daniel"], input=pasted_then_typed, env=env)
+    assert ok.exit_code == 0, ok.output
+    assert auth.verify_password(PASSWORD, _password_hash(engine, "daniel"))
+
+    bad = runner.invoke(
+        app, ["profile", "password", "daniel"], input=f"{PASSWORD}\nother password\n", env=env
+    )
+    assert bad.exit_code != 0 and "differ" in bad.output
+    assert "short" not in bad.output
+
+
+def test_cli_short_password_from_stdin_is_refused(engine: Engine, db_url: str) -> None:
+    from typer.testing import CliRunner
+
+    from job_finder.cli import app
+
+    add_profile(engine, "daniel", password=None)
+    result = CliRunner().invoke(
+        app,
+        ["profile", "password", "daniel", "--stdin"],
+        input="short\n",
+        env={"JOBFINDER_DATABASE_URL": db_url},
+    )
+    assert result.exit_code != 0 and _password_hash(engine, "daniel") is None

@@ -177,17 +177,38 @@ def profile_export(name: Annotated[str, typer.Argument(help="Profile name.")]) -
         typer.echo(write_profile_yaml(repo.profile_from(db)), nl=False)
 
 
+def _clean_password(raw: str) -> str:
+    """Drops what terminals add around typed or pasted text: bracketed-paste markers
+    and line endings (a TTY chain such as ssh -t + docker exec may pass "\\r")."""
+    for marker in ("\x1b[200~", "\x1b[201~"):
+        raw = raw.replace(marker, "")
+    return raw.strip("\r\n")
+
+
 @profile_app.command("password")
 def profile_password(
     name: Annotated[str, typer.Argument(help="Profile name (also the site username).")],
+    stdin: Annotated[
+        bool, typer.Option("--stdin", help="Read the password from the first line of stdin.")
+    ] = False,
 ) -> None:
     """Sets the profile's site password (asked twice, never echoed). Signs out its
     open sessions."""
+    import sys
+
     from job_finder.web import auth
 
     engine = _engine()
     profile_id = _profile_id(engine, name)
-    password = typer.prompt("New password", hide_input=True, confirmation_prompt=True)
+    if stdin:
+        password = _clean_password(sys.stdin.readline())
+    else:
+        password = _clean_password(typer.prompt("New password", hide_input=True))
+        again = _clean_password(typer.prompt("Repeat it", hide_input=True))
+        if again != password:
+            raise typer.BadParameter(
+                f"the two entries differ ({len(password)} and {len(again)} characters)"
+            )
     try:
         hashed = auth.hash_password(password)
     except ValueError as e:
