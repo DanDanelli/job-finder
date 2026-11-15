@@ -22,7 +22,8 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    engine = criar_engine(url)
+    # FKs desligadas: ver criar_engine. A integridade é conferida no fim.
+    engine = criar_engine(url, foreign_keys=False)
     with engine.connect() as connection:
         context.configure(
             connection=connection,
@@ -31,6 +32,10 @@ def run_migrations_online() -> None:
         )
         with context.begin_transaction():
             context.run_migrations()
+            if connection.dialect.name == "sqlite":
+                violacoes = connection.exec_driver_sql("PRAGMA foreign_key_check").all()
+                if violacoes:
+                    raise RuntimeError(f"migração deixou FKs inválidas: {violacoes[:5]}")
     engine.dispose()
 
 

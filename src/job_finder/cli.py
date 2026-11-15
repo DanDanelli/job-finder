@@ -16,6 +16,7 @@ from job_finder.config import get_settings
 from job_finder.db import repo
 from job_finder.db import session as db_session
 from job_finder.db.models import PerfilDB
+from job_finder.domain import Vaga
 
 app = typer.Typer(help="Job Finder: busca vagas e ranqueia por fit com o currículo.")
 db_app = typer.Typer(help="Banco de dados.")
@@ -31,6 +32,10 @@ def _configurar() -> None:
         level=get_settings().log_level.upper(),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    # O httpx loga a URL de cada requisição em INFO, e a API do Telegram leva o token do
+    # bot na URL. Esses loggers ficam em WARNING para o token nunca ir para o log.
+    for ruidoso in ("httpx", "httpx2", "httpcore"):
+        logging.getLogger(ruidoso).setLevel(logging.WARNING)
 
 
 @contextmanager
@@ -176,56 +181,60 @@ def run(
     ] = False,
 ) -> None:
     """Executa uma rodada: coleta, normaliza, deduplica, filtra e pontua por perfil."""
-    from job_finder.connectors import base
-    from job_finder.pipeline.run import executar_rodada
+    from job_finder.servico import NenhumPerfil, rodada_completa
 
     settings = get_settings()
     engine = _engine()
-    with base.cliente_http() as http, db_session.sessao(engine, commit=not dry_run) as s:
-        perfis = repo.listar_perfis(s, perfil or None)
-        if not perfis:
-            raise typer.BadParameter("nenhum perfil encontrado; use `job-finder perfil carregar`")
-        conectores = [base.criar(nome, http) for nome in settings.conectores]
-        resumo = executar_rodada(
-            s,
-            engine,
-            conectores,
-            perfis,
-            agora=datetime.now(UTC),
-            tipo="dry_run" if dry_run else "sob_demanda",
-        )
+    try:
+        with _erros_do_claude(), console.status("Rodando..."):
+            relatorio = rodada_completa(
+                engine,
+                settings,
+                nomes=perfil or None,
+                tipo="sob_demanda",
+                dry_run=dry_run,
+                pontuar=not sem_llm,
+            )
+    except NenhumPerfil as e:
+        raise typer.BadParameter(str(e)) from e
 
+    resumo = relatorio.rodada
     fontes = ", ".join(f"{f}: {n}" for f, n in resumo.por_fonte.items()) or "nenhuma"
     console.print(
         f"[bold]Coletadas:[/] {resumo.coletadas} ({fontes}) · [bold]novas:[/] {resumo.novas}"
         + (" · [yellow]dry-run, nada gravado[/]" if dry_run else "")
     )
-    for erro in resumo.erros:
-        console.print(f"[red]⚠ {erro}[/]")
-    for rp in resumo.perfis:
-        descartes = ", ".join(f"{m}: {n}" for m, n in rp.descartes.most_common()) or "nenhum"
-        tabela = Table(
-            title=f"{rp.nome}: {len(rp.aprovadas)} de {rp.avaliadas} passaram nos filtros",
-            caption=f"Descartes: {descartes}",
+    for rp in relatorio.perfis:
+        f = rp.filtros
+        descartes = ", ".join(f"{m}: {n}" for m, n in f.descartes.most_common()) or "nenhum"
+        console.print(
+            f"[bold]{rp.nome}[/]: {len(f.aprovadas)} de {f.avaliadas} passaram nos filtros"
+            f" (descartes: {descartes})"
         )
-        for coluna in ("Vaga", "Empresa", "Local", "Salário", "Link"):
-            tabela.add_column(coluna, overflow="fold")
-        for v in rp.aprovadas:
-            sal = v.salario
-            salario = (
-                f"{sal.moeda or ''} {sal.minimo:,.0f}-{sal.maximo:,.0f}/{sal.periodo or '?'}"
-                if sal and sal.minimo is not None and sal.maximo is not None
-                else "-"
+        if rp.scoring:
+            console.print(
+                f"  {rp.scoring.avaliadas} vagas pontuadas de {rp.scoring.pendentes} pendentes"
             )
-            tabela.add_row(v.titulo, v.empresa or "-", v.local_texto or "-", salario, str(v.url))
-        console.print(tabela)
+            _mostrar_ranking(engine, rp.perfil_id)
+        elif dry_run:
+            _mostrar_aprovadas(f.aprovadas)
+    for aviso in {a for rp in relatorio.perfis for a in relatorio.avisos_de(rp.perfil_id)}:
+        console.print(f"[red]⚠ {aviso}[/]")
 
-    if dry_run or sem_llm:
-        return
-    if settings.anthropic_api_key is None:
-        console.print("[yellow]Sem ANTHROPIC_API_KEY no .env: matches ficam pendentes.[/]")
-        return
-    _pontuar(engine, [rp.nome for rp in resumo.perfis], resumo.execucao_id)
+
+def _mostrar_aprovadas(vagas: list[Vaga]) -> None:
+    tabela = Table()
+    for coluna in ("Vaga", "Empresa", "Local", "Salário", "Link"):
+        tabela.add_column(coluna, overflow="fold")
+    for v in vagas:
+        sal = v.salario
+        salario = (
+            f"{sal.moeda or ''} {sal.minimo:,.0f}-{sal.maximo:,.0f}/{sal.periodo or '?'}"
+            if sal and sal.minimo is not None and sal.maximo is not None
+            else "-"
+        )
+        tabela.add_row(v.titulo, v.empresa or "-", v.local_texto or "-", salario, str(v.url))
+    console.print(tabela)
 
 
 def _pontuar(engine: Engine, nomes: list[str] | None, execucao_id: int | None = None) -> None:
@@ -302,6 +311,44 @@ def pontuar(
     if get_settings().anthropic_api_key is None:
         raise typer.BadParameter("ANTHROPIC_API_KEY não configurada (coloque no .env)")
     _pontuar(_engine(), perfil or None)
+
+
+@app.command()
+def digest(
+    perfil: Annotated[str, typer.Option("--perfil", "-p", help="Nome do perfil.")],
+) -> None:
+    """Envia agora, pelo Telegram, o digest das vagas com nota ainda não notificadas."""
+    import asyncio
+
+    from job_finder.telegram.bot import EnviadorTelegram, criar_aplicacao
+    from job_finder.telegram.digest import enviar_digest
+
+    settings = get_settings()
+    if settings.telegram_bot_token is None:
+        raise typer.BadParameter("JOBFINDER_TELEGRAM_BOT_TOKEN não configurado (coloque no .env)")
+    engine = _engine()
+    with db_session.sessao(engine, commit=False) as s:
+        db = repo.buscar_perfil(s, perfil)
+        if db is None:
+            raise typer.BadParameter(f"perfil '{perfil}' não encontrado")
+        if db.telegram_chat_id is None:
+            raise typer.BadParameter(
+                f"perfil '{perfil}' sem telegram_chat_id; mande /start para o bot para descobrir"
+            )
+        perfil_id = db.id
+
+    async def enviar() -> int:
+        bot_app = criar_aplicacao(settings.telegram_bot_token.get_secret_value())  # type: ignore[union-attr]
+        async with bot_app.bot as bot:
+            return await enviar_digest(
+                engine,
+                EnviadorTelegram(bot),
+                perfil_id,
+                score_minimo=settings.digest_score_minimo,
+                maximo=settings.digest_max_vagas,
+            )
+
+    console.print(f"{asyncio.run(enviar())} vagas enviadas para {perfil}.")
 
 
 @app.command()

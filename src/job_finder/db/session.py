@@ -13,20 +13,29 @@ from sqlalchemy.orm import Session, sessionmaker
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
 
-def _configurar_sqlite(dbapi_connection: Any, _record: Any) -> None:
-    cursor = dbapi_connection.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA foreign_keys=ON")
-    cursor.execute("PRAGMA busy_timeout=5000")
-    cursor.close()
+def _configurar_sqlite(foreign_keys: bool) -> Any:
+    def configurar(dbapi_connection: Any, _record: Any) -> None:
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute(f"PRAGMA foreign_keys={'ON' if foreign_keys else 'OFF'}")
+        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.close()
+
+    return configurar
 
 
-def criar_engine(url: str) -> Engine:
+def criar_engine(url: str, *, foreign_keys: bool = True) -> Engine:
+    """Engine com WAL e busy_timeout no SQLite.
+
+    `foreign_keys=False` só nas migrações: o modo batch do Alembic recria a tabela
+    (cria a nova, copia, apaga a antiga), e com as FKs ligadas apagar a antiga dispara
+    o ON DELETE CASCADE nas tabelas filhas.
+    """
     if url.startswith("sqlite:///"):
         Path(url.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(url)
     if engine.dialect.name == "sqlite":
-        event.listen(engine, "connect", _configurar_sqlite)
+        event.listen(engine, "connect", _configurar_sqlite(foreign_keys))
     return engine
 
 

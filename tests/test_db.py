@@ -69,3 +69,50 @@ def test_chave_dedup_e_unica(engine: Engine) -> None:
 def test_foreign_key_e_aplicada(engine: Engine) -> None:
     with pytest.raises(IntegrityError), sessao(engine) as s:
         s.add(MatchDB(vaga_id=999, perfil_id=999, status="nova"))
+
+
+def test_migracoes_preservam_dados_das_tabelas_filhas(db_url: str) -> None:
+    """O modo batch recria tabelas; com FKs ligadas isso apagava os matches em cascata."""
+    from sqlalchemy import create_engine, text
+
+    from job_finder.db.session import upgrade
+
+    upgrade(db_url, "0001")
+    bruto = create_engine(db_url)
+    with bruto.begin() as c:
+        c.execute(
+            text(
+                "INSERT INTO perfis (id, nome, dados, queries, filtros, preferencias, "
+                "criado_em, atualizado_em) VALUES (1, 'p', '{}', '[]', '{}', '', "
+                "'2026-11-15', '2026-11-15')"
+            )
+        )
+        c.execute(
+            text(
+                "INSERT INTO vagas (id, chave_dedup, titulo, modalidade, url, criado_em, "
+                "atualizado_em) VALUES (1, 'k', 't', 'remoto', 'https://x', "
+                "'2026-11-15', '2026-11-15')"
+            )
+        )
+        c.execute(
+            text(
+                "INSERT INTO vaga_fontes (vaga_id, fonte, id_fonte, url, dados_brutos, "
+                "coletada_em) VALUES (1, 'f', '1', 'https://x', '{}', '2026-11-15')"
+            )
+        )
+        c.execute(
+            text(
+                "INSERT INTO matches (vaga_id, perfil_id, status, pontos_fortes, gaps, "
+                "dealbreakers, tentativas, criado_em, atualizado_em) VALUES (1, 1, "
+                "'nova', '[]', '[]', '[]', 0, '2026-11-15', '2026-11-15')"
+            )
+        )
+    bruto.dispose()
+
+    upgrade(db_url)  # 0002 recria `vagas`, 0003 recria `perfis`
+
+    bruto = create_engine(db_url)
+    with bruto.connect() as c:
+        assert c.execute(text("SELECT count(*) FROM matches")).scalar() == 1
+        assert c.execute(text("SELECT count(*) FROM vaga_fontes")).scalar() == 1
+    bruto.dispose()

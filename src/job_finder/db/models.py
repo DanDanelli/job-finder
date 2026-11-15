@@ -15,6 +15,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy import false as sa_false
 from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeDecorator
@@ -64,6 +65,8 @@ class PerfilDB(Timestamps, Base):
     filtros: Mapped[dict[str, Any]] = mapped_column(default=dict)
     preferencias: Mapped[str] = mapped_column(Text, default="")
     curriculo_path: Mapped[str | None] = mapped_column(String(512))
+    # Pausado: fica fora das rodadas agendadas e não recebe digest.
+    pausado: Mapped[bool] = mapped_column(default=False, server_default=sa_false())
 
     matches: Mapped[list["MatchDB"]] = relationship(back_populates="perfil")
 

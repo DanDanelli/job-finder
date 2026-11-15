@@ -1,5 +1,6 @@
 """Configuração da aplicação, lida de variáveis de ambiente e do arquivo `.env`."""
 
+from datetime import time
 from functools import lru_cache
 from pathlib import Path
 
@@ -34,6 +35,15 @@ class Settings(BaseSettings):
     custo_mensal_max_usd: float = Field(default=5.0, ge=0)
     # Quantas vagas pendentes, por perfil e rodada, vão para o LLM após o BM25.
     prerank_top_n: int = Field(default=30, ge=1)
+
+    # Telegram: token do @BotFather. Sem token, o bot não sobe (as rodadas seguem).
+    telegram_bot_token: SecretStr | None = None
+    # Rodadas agendadas, no fuso `timezone`, ex: JOBFINDER_HORARIOS='["08:00","18:00"]'
+    agendamento_ativo: bool = True
+    horarios: list[time] = [time(8), time(18)]
+    # Digest: vagas com score >= mínimo, no máximo N por envio (o resto fica para o próximo).
+    digest_score_minimo: int = Field(default=60, ge=0, le=100)
+    digest_max_vagas: int = Field(default=10, ge=1)
 
     @property
     def resolved_database_url(self) -> str:

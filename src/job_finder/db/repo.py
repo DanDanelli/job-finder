@@ -51,11 +51,19 @@ def perfil_de(db: PerfilDB) -> Perfil:
     )
 
 
-def listar_perfis(s: Session, nomes: list[str] | None = None) -> list[PerfilDB]:
+def listar_perfis(
+    s: Session, nomes: list[str] | None = None, *, incluir_pausados: bool = True
+) -> list[PerfilDB]:
     consulta = select(PerfilDB).order_by(PerfilDB.nome)
     if nomes:
         consulta = consulta.where(PerfilDB.nome.in_(nomes))
+    if not incluir_pausados:
+        consulta = consulta.where(PerfilDB.pausado.is_(False))
     return list(s.scalars(consulta))
+
+
+def perfil_do_chat(s: Session, chat_id: int) -> PerfilDB | None:
+    return s.scalar(select(PerfilDB).where(PerfilDB.telegram_chat_id == chat_id))
 
 
 # --- vagas --------------------------------------------------------------------
