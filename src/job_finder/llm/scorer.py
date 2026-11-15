@@ -16,7 +16,7 @@ from sqlalchemy import Engine, select
 from job_finder.db import repo
 from job_finder.db.models import MatchDB, PerfilDB
 from job_finder.db.session import sessao
-from job_finder.domain import Perfil, ResultadoFit, StatusMatch, Vaga
+from job_finder.domain import Perfil, ResultadoFit, StatusMatch, TipoContrato, Vaga
 from job_finder.llm.client import (
     ClienteLLM,
     LimiteDeCustoAtingido,
@@ -59,6 +59,8 @@ Dealbreakers são requisitos objetivos da vaga que a pessoa não cumpre, por exe
 pessoa pode trabalhar (remoto_a_partir_de) ou com os países aceitos para trabalho \
 presencial (paises);
 - trabalho presencial ou híbrido numa cidade ou país fora do que a pessoa aceita;
+- salário informado abaixo do mínimo da pessoa para aquele tipo de contrato (CLT ou PJ), \
+comparando só na mesma moeda e no mesmo período;
 - algo que as preferências da pessoa dizem explicitamente que ela não quer.
 Se houver qualquer dealbreaker, o score fica em no máximo 40.
 
@@ -68,6 +70,12 @@ ao texto da vaga. Nada de frases genéricas como "boa experiência".
 - dealbreakers: lista vazia quando não houver.
 - resumo: 1 ou 2 frases dizendo por que a vaga serve ou não serve para a pessoa.
 """
+
+
+ROTULOS_CONTRATO = {
+    TipoContrato.TEMPO_INTEGRAL: "CLT / tempo integral",
+    TipoContrato.CONTRATO: "PJ / contractor",
+}
 
 
 def bloco_perfil(perfil: Perfil) -> str:
@@ -83,6 +91,11 @@ def bloco_perfil(perfil: Perfil) -> str:
             "salario_minimo": f.salario_minimo.model_dump(mode="json")
             if f.salario_minimo
             else None,
+            "salario_minimo_por_contrato": {
+                ROTULOS_CONTRATO.get(tipo, tipo.value): s.model_dump(mode="json")
+                for tipo, s in f.salario_minimo_por_contrato.items()
+            }
+            or None,
         },
         "preferencias": perfil.preferencias.strip() or None,
     }

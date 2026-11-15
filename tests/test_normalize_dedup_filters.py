@@ -211,3 +211,27 @@ def test_sigla_de_estado_brasileiro_nao_vira_pais(texto: str, esperado: list[str
     from job_finder.pipeline.locais import interpretar_local
 
     assert interpretar_local(texto) == esperado
+
+
+@pytest.mark.parametrize(
+    ("contrato", "mensal", "motivo"),
+    [
+        ("tempo_integral", 22_000, None),  # CLT acima de 20k
+        ("tempo_integral", 18_000, "salario"),
+        ("contrato", 25_000, "salario"),  # PJ abaixo de 30k
+        ("contrato", 32_000, None),
+        (None, 22_000, None),  # sem tipo: usa o mínimo geral (20k)
+    ],
+)
+def test_salario_minimo_por_tipo_de_contrato(
+    contrato: str | None, mensal: int, motivo: str | None
+) -> None:
+    filtros = Filtros(
+        salario_minimo=Salario(minimo=20_000, moeda="BRL", periodo="mes"),
+        salario_minimo_por_contrato={
+            "tempo_integral": Salario(minimo=20_000, moeda="BRL", periodo="mes"),
+            "contrato": Salario(minimo=30_000, moeda="BRL", periodo="mes"),
+        },
+    )
+    salario = Salario(minimo=mensal, maximo=mensal, moeda="BRL", periodo="mes")
+    assert motivo_descarte(vaga(salario=salario, tipo_contrato=contrato), filtros, AGORA) == motivo

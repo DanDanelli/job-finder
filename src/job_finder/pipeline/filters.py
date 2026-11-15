@@ -6,7 +6,7 @@ desconhecido), ela passa, e o scoring do LLM avalia.
 
 from datetime import datetime, timedelta
 
-from job_finder.domain import Filtros, Modalidade, Vaga
+from job_finder.domain import Filtros, Modalidade, Salario, Vaga
 from job_finder.pipeline.dedup import empresa_canonica
 from job_finder.pipeline.locais import elegivel
 from job_finder.pipeline.salario import anual
@@ -63,8 +63,14 @@ def motivo_descarte(vaga: Vaga, filtros: Filtros, agora: datetime) -> str | None
     return None
 
 
+def salario_minimo_para(vaga: Vaga, filtros: Filtros) -> Salario | None:
+    if vaga.tipo_contrato and vaga.tipo_contrato in filtros.salario_minimo_por_contrato:
+        return filtros.salario_minimo_por_contrato[vaga.tipo_contrato]
+    return filtros.salario_minimo
+
+
 def _abaixo_do_salario(vaga: Vaga, filtros: Filtros) -> bool:
-    minimo, salario = filtros.salario_minimo, vaga.salario
+    minimo, salario = salario_minimo_para(vaga, filtros), vaga.salario
     if not minimo or minimo.minimo is None or not salario:
         return False
     teto_vaga = salario.maximo if salario.maximo is not None else salario.minimo

@@ -110,7 +110,10 @@ class Filtros(BaseModel):
     modalidades: list[Modalidade] = Field(default_factory=list)  # vazio = todas
     idiomas: list[str] = Field(default_factory=list)  # avaliado pelo LLM (M2), não em código
     tipos_contrato: list[TipoContrato] = Field(default_factory=list)  # vazio = todos
+    # Mínimo geral, e mínimos por tipo de contrato (ex: CLT = tempo_integral, PJ = contrato).
+    # Vaga sem tipo de contrato usa o geral.
     salario_minimo: Salario | None = None
+    salario_minimo_por_contrato: dict[TipoContrato, Salario] = Field(default_factory=dict)
     empresas_bloqueadas: list[str] = Field(default_factory=list)
     palavras_bloqueadas: list[str] = Field(default_factory=list)
     idade_maxima_dias: int = Field(default=14, ge=1)

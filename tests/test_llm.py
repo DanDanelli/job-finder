@@ -455,3 +455,14 @@ def test_cli_pontuar_sem_chave_falha_com_mensagem() -> None:
     r = CliRunner().invoke(cli_app, ["pontuar"])
     assert r.exit_code != 0
     assert "ANTHROPIC_API_KEY" in r.output
+
+
+def test_bloco_do_perfil_traz_o_minimo_por_contrato() -> None:
+    from job_finder.domain import Salario
+    from job_finder.llm.scorer import bloco_perfil
+
+    filtros = Filtros(
+        salario_minimo_por_contrato={"contrato": Salario(minimo=30_000, moeda="BRL", periodo="mes")}
+    )
+    bloco = bloco_perfil(Perfil(nome="x", filtros=filtros))
+    assert "PJ / contractor" in bloco and "30000" in bloco
