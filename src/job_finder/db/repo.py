@@ -1,11 +1,11 @@
 """Data access: conversion between tables and domain models."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.orm import Session
 
-from job_finder.db.models import JobDB, JobSourceDB, MatchDB, ProfileDB
+from job_finder.db.models import JobDB, JobSourceDB, MatchDB, ProfileDB, utcnow
 from job_finder.domain import (
     ContractType,
     Filters,
@@ -17,6 +17,7 @@ from job_finder.domain import (
     Salary,
     WorkMode,
 )
+from job_finder.pipeline.dedup import is_fuzzy_duplicate, split_key
 
 MANUAL_SOURCE = "manual"  # ad-hoc evaluation requested through the bot
 
@@ -71,8 +72,13 @@ def profile_for_chat(s: Session, chat_id: int) -> ProfileDB | None:
 # --- jobs ---------------------------------------------------------------------
 
 
+# How far back the fuzzy match looks for the same job.
+FUZZY_DAYS = 30
+
+
 def record_job(s: Session, raw: RawJob, job: Job, key: str) -> tuple[JobDB, bool]:
-    """Stores the job (or reuses the existing one with the same key) and its source sighting.
+    """Stores the job (or reuses the existing one, same key or fuzzy match) and its source
+    sighting.
 
     Returns (job, is_new), where `is_new` means the job was not in the database yet.
     """
@@ -84,12 +90,14 @@ def record_job(s: Session, raw: RawJob, job: Job, key: str) -> tuple[JobDB, bool
     if source is not None:
         return source.job, False
 
-    db = s.scalar(select(JobDB).where(JobDB.dedup_key == key))
+    db = s.scalar(select(JobDB).where(JobDB.dedup_key == key)) or _similar_job(s, key)
     is_new = db is None
     if db is None:
         db = _job_db(job, key)
         s.add(db)
         s.flush()
+    elif db.apply_url is None and job.apply_url is not None:
+        db.apply_url = str(job.apply_url)  # prefer the direct application link
     s.add(
         JobSourceDB(
             job_id=db.id,
@@ -101,6 +109,22 @@ def record_job(s: Session, raw: RawJob, job: Job, key: str) -> tuple[JobDB, bool
     )
     s.flush()
     return db, is_new
+
+
+def _similar_job(s: Session, key: str) -> JobDB | None:
+    company, _, _ = split_key(key)
+    if not company:
+        return None
+    prefix = company.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    candidates = s.scalars(
+        select(JobDB)
+        .where(
+            JobDB.dedup_key.like(f"{prefix}|%", escape="\\"),
+            JobDB.created_at >= utcnow() - timedelta(days=FUZZY_DAYS),
+        )
+        .order_by(JobDB.id)
+    )
+    return next((c for c in candidates if is_fuzzy_duplicate(key, c.dedup_key)), None)
 
 
 def _job_db(job: Job, key: str) -> JobDB:
