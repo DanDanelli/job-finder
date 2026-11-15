@@ -3,6 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,6 +22,18 @@ class Settings(BaseSettings):
     port: int = 8000
     # Conectores usados nas rodadas, ex: JOBFINDER_CONECTORES='["remotive"]'
     conectores: list[str] = ["remotive"]
+
+    # Claude API. A chave usa o nome padrão do SDK, sem o prefixo JOBFINDER_.
+    anthropic_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("ANTHROPIC_API_KEY", "JOBFINDER_ANTHROPIC_API_KEY"),
+    )
+    modelo_perfil: str = "claude-opus-5-5"
+    modelo_scoring: str = "claude-haiku-5-5"
+    # Teto de gasto com o Claude no mês (UTC). Ao atingir, as chamadas param.
+    custo_mensal_max_usd: float = Field(default=5.0, ge=0)
+    # Quantas vagas pendentes, por perfil e rodada, vão para o LLM após o BM25.
+    prerank_top_n: int = Field(default=30, ge=1)
 
     @property
     def resolved_database_url(self) -> str:

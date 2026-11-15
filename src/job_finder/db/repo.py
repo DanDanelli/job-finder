@@ -23,7 +23,7 @@ from job_finder.domain import (
 
 def salvar_perfil(s: Session, perfil: Perfil) -> PerfilDB:
     """Cria ou atualiza o perfil pelo nome."""
-    db = s.scalar(select(PerfilDB).where(PerfilDB.nome == perfil.nome))
+    db = buscar_perfil(s, perfil.nome)
     if db is None:
         db = PerfilDB(nome=perfil.nome)
         s.add(db)
@@ -34,6 +34,10 @@ def salvar_perfil(s: Session, perfil: Perfil) -> PerfilDB:
     db.preferencias = perfil.preferencias
     s.flush()
     return db
+
+
+def buscar_perfil(s: Session, nome: str) -> PerfilDB | None:
+    return s.scalar(select(PerfilDB).where(PerfilDB.nome == nome))
 
 
 def perfil_de(db: PerfilDB) -> Perfil:

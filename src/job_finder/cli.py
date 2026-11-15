@@ -1,6 +1,8 @@
 """Linha de comando: `job-finder ...`."""
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -13,6 +15,7 @@ from sqlalchemy import Engine
 from job_finder.config import get_settings
 from job_finder.db import repo
 from job_finder.db import session as db_session
+from job_finder.db.models import PerfilDB
 
 app = typer.Typer(help="Job Finder: busca vagas e ranqueia por fit com o currículo.")
 db_app = typer.Typer(help="Banco de dados.")
@@ -28,6 +31,24 @@ def _configurar() -> None:
         level=get_settings().log_level.upper(),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+
+
+@contextmanager
+def _erros_do_claude() -> Iterator[None]:
+    """Erro da API do Claude vira uma mensagem curta em vez de traceback."""
+    import anthropic
+
+    from job_finder.llm.client import LimiteDeCustoAtingido, RespostaInvalida
+
+    try:
+        yield
+    except anthropic.APIStatusError as e:
+        mensagem = e.body.get("error", {}).get("message") if isinstance(e.body, dict) else None
+        console.print(f"[red]Claude API ({e.status_code}): {mensagem or e}[/]")
+        raise typer.Exit(1) from e
+    except (anthropic.APIConnectionError, LimiteDeCustoAtingido, RespostaInvalida) as e:
+        console.print(f"[red]Claude: {e}[/]")
+        raise typer.Exit(1) from e
 
 
 def _engine() -> Engine:
@@ -54,8 +75,84 @@ def perfil_carregar(
     with db_session.sessao(_engine()) as s:
         for arquivo in arquivos:
             perfil = ler_perfil_yaml(arquivo)
+            existente = repo.buscar_perfil(s, perfil.nome)
+            if "dados" not in perfil.model_fields_set and existente is not None:
+                # YAML sem `dados`: mantém o que foi extraído do currículo.
+                perfil.dados = repo.perfil_de(existente).dados
             repo.salvar_perfil(s, perfil)
             typer.echo(f"Perfil '{perfil.nome}' salvo ({len(perfil.queries)} queries).")
+
+
+@perfil_app.command("importar")
+def perfil_importar(
+    curriculo: Annotated[Path, typer.Argument(exists=True, dir_okay=False, help="PDF.")],
+    perfil: Annotated[str, typer.Option("--perfil", "-p", help="Nome do perfil.")],
+) -> None:
+    """Lê o currículo com o Claude e preenche os dados e as queries do perfil."""
+    import shutil
+
+    from job_finder.domain import Perfil, Query
+    from job_finder.llm.client import criar_cliente
+    from job_finder.llm.profile_extractor import extrair_perfil
+
+    settings = get_settings()
+    engine = _engine()
+    destino = settings.data_dir / "curriculos" / f"{perfil}.pdf"
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    if curriculo.resolve() != destino.resolve():
+        shutil.copyfile(curriculo, destino)
+
+    with db_session.sessao(engine) as s:
+        db = repo.buscar_perfil(s, perfil) or repo.salvar_perfil(s, Perfil(nome=perfil))
+        perfil_id = db.id
+
+    cliente = criar_cliente(engine)
+    with _erros_do_claude(), console.status(f"Lendo o currículo com {settings.modelo_perfil}..."):
+        extracao = extrair_perfil(
+            cliente, destino, modelo=settings.modelo_perfil, perfil_id=perfil_id
+        )
+
+    with db_session.sessao(engine) as s:
+        db = s.get_one(PerfilDB, perfil_id)
+        atual = repo.perfil_de(db)
+        atual.dados = extracao.dados
+        # Termos novos entram ativos só se o perfil ainda não tinha nenhuma query ativa;
+        # senão entram desativados, para o usuário revisar.
+        tinha_ativas = any(q.ativa for q in atual.queries)
+        conhecidos = {q.termo.casefold() for q in atual.queries}
+        novos = [t for t in extracao.termos_busca if t.casefold() not in conhecidos]
+        atual.queries += [Query(termo=t, ativa=not tinha_ativas) for t in novos]
+        repo.salvar_perfil(s, atual)
+        db.curriculo_path = str(destino)
+
+    d = extracao.dados
+    console.print(f"[bold]{perfil}[/]: {d.senioridade or '?'}, {d.anos_experiencia or '?'} anos")
+    console.print(d.resumo)
+    console.print("[bold]Cargos:[/] " + ", ".join(d.cargos))
+    console.print("[bold]Skills:[/] " + ", ".join(f"{k.nome} ({k.peso})" for k in d.skills))
+    console.print("[bold]Idiomas:[/] " + ", ".join(f"{i.codigo} {i.nivel}" for i in d.idiomas))
+    console.print(
+        "[bold]Queries novas:[/] "
+        + (", ".join(novos) or "nenhuma")
+        + ("" if not tinha_ativas or not novos else " [yellow](desativadas, revise)[/]")
+    )
+    console.print(
+        f"Custo no mês: US$ {cliente.gasto_no_mes():.4f}. "
+        f"Revise com `job-finder perfil exportar {perfil} > perfil.yaml`, edite e "
+        "`job-finder perfil carregar perfil.yaml`."
+    )
+
+
+@perfil_app.command("exportar")
+def perfil_exportar(nome: Annotated[str, typer.Argument(help="Nome do perfil.")]) -> None:
+    """Imprime o perfil em YAML, no formato que `perfil carregar` lê."""
+    from job_finder.perfis import escrever_perfil_yaml
+
+    with db_session.sessao(_engine(), commit=False) as s:
+        db = repo.buscar_perfil(s, nome)
+        if db is None:
+            raise typer.BadParameter(f"perfil '{nome}' não encontrado")
+        typer.echo(escrever_perfil_yaml(repo.perfil_de(db)), nl=False)
 
 
 @perfil_app.command("listar")
@@ -74,8 +171,11 @@ def run(
         list[str] | None, typer.Option("--perfil", "-p", help="Só estes perfis.")
     ] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Não grava nada no banco.")] = False,
+    sem_llm: Annotated[
+        bool, typer.Option("--sem-llm", help="Não pontua com o Claude; matches ficam pendentes.")
+    ] = False,
 ) -> None:
-    """Executa uma rodada: coleta, normaliza, deduplica e filtra por perfil."""
+    """Executa uma rodada: coleta, normaliza, deduplica, filtra e pontua por perfil."""
     from job_finder.connectors import base
     from job_finder.pipeline.run import executar_rodada
 
@@ -119,6 +219,89 @@ def run(
             )
             tabela.add_row(v.titulo, v.empresa or "-", v.local_texto or "-", salario, str(v.url))
         console.print(tabela)
+
+    if dry_run or sem_llm:
+        return
+    if settings.anthropic_api_key is None:
+        console.print("[yellow]Sem ANTHROPIC_API_KEY no .env: matches ficam pendentes.[/]")
+        return
+    _pontuar(engine, [rp.nome for rp in resumo.perfis], resumo.execucao_id)
+
+
+def _pontuar(engine: Engine, nomes: list[str] | None, execucao_id: int | None = None) -> None:
+    from job_finder.llm.client import criar_cliente
+    from job_finder.llm.scorer import pontuar_pendentes
+
+    settings = get_settings()
+    cliente = criar_cliente(engine)
+    with db_session.sessao(engine, commit=False) as s:
+        perfis = [(p.id, p.nome) for p in repo.listar_perfis(s, nomes)]
+    if not perfis:
+        raise typer.BadParameter("nenhum perfil encontrado; use `job-finder perfil carregar`")
+
+    for perfil_id, nome in perfis:
+        with (
+            _erros_do_claude(),
+            console.status(f"Pontuando vagas de {nome} com {settings.modelo_scoring}..."),
+        ):
+            r = pontuar_pendentes(
+                engine,
+                cliente,
+                perfil_id,
+                modelo=settings.modelo_scoring,
+                top_n=settings.prerank_top_n,
+                agora=datetime.now(UTC),
+                execucao_id=execucao_id,
+            )
+        console.print(
+            f"[bold]{nome}[/]: {r.avaliadas} vagas pontuadas de {r.pendentes} pendentes"
+            + (f", {len(r.falhas)} falhas" if r.falhas else "")
+        )
+        for falha in r.falhas:
+            console.print(f"[red]⚠ {falha}[/]")
+        if r.interrompido:
+            console.print(f"[red]⚠ {r.interrompido}[/]")
+            break
+        _mostrar_ranking(engine, perfil_id)
+    console.print(f"Custo do Claude no mês: US$ {cliente.gasto_no_mes():.4f}")
+
+
+def _mostrar_ranking(engine: Engine, perfil_id: int, limite: int = 10) -> None:
+    from sqlalchemy import select
+
+    from job_finder.db.models import MatchDB
+    from job_finder.domain import StatusMatch
+
+    with db_session.sessao(engine, commit=False) as s:
+        matches = s.scalars(
+            select(MatchDB)
+            .where(MatchDB.perfil_id == perfil_id, MatchDB.status == StatusMatch.NOVA)
+            .order_by(MatchDB.score.desc())
+            .limit(limite)
+        ).all()
+        if not matches:
+            return
+        tabela = Table(title="Melhores vagas novas")
+        for coluna in ("Score", "Vaga", "Empresa", "Por quê", "Link"):
+            tabela.add_column(coluna, overflow="fold")
+        for m in matches:
+            porque = m.resumo or ""
+            if m.dealbreakers:
+                porque += " [red]✗ " + "; ".join(m.dealbreakers) + "[/]"
+            tabela.add_row(str(m.score), m.vaga.titulo, m.vaga.empresa or "-", porque, m.vaga.url)
+        console.print(tabela)
+
+
+@app.command()
+def pontuar(
+    perfil: Annotated[
+        list[str] | None, typer.Option("--perfil", "-p", help="Só estes perfis.")
+    ] = None,
+) -> None:
+    """Pontua com o Claude as vagas pendentes (sem coletar vagas novas)."""
+    if get_settings().anthropic_api_key is None:
+        raise typer.BadParameter("ANTHROPIC_API_KEY não configurada (coloque no .env)")
+    _pontuar(_engine(), perfil or None)
 
 
 @app.command()
