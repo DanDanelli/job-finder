@@ -21,8 +21,9 @@ from job_finder.i18n import t
 
 log = logging.getLogger(__name__)
 
-# Display names of the sources. Remotive's terms ask to credit it as the source.
-SOURCE_NAMES = {"remotive": "Remotive"}
+# Display names of the sources. Remotive's, Remote OK's and Himalayas' terms ask to
+# credit them as the source.
+SOURCE_NAMES = {"remotive": "Remotive", "remoteok": "Remote OK", "himalayas": "Himalayas"}
 WORK_MODES = {"remote", "hybrid", "onsite"}
 PERIODS = {"year", "month", "hour"}
 

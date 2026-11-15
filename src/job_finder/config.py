@@ -59,6 +59,13 @@ class Settings(BaseSettings):
     jsearch_monthly_limit: int | None = 190  # free plan: ~200/month, with some slack
     jsearch_date_posted: str = "3days"  # all, today, 3days, week, month
 
+    # Himalayas (remote jobs). The key is optional: without it, calls share a public
+    # allowance; a free key from himalayas.app raises the limit.
+    himalayas_api_key: SecretStr | None = None
+    himalayas_countries: list[str] = ["BR"]  # for queries with no country
+    himalayas_searches_per_run: int = Field(default=5, ge=1)
+    himalayas_daily_limit: int | None = 20
+
     @property
     def resolved_database_url(self) -> str:
         """Database URL; by default a SQLite file inside `data_dir`."""

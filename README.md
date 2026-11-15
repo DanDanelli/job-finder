@@ -11,7 +11,8 @@ on a Raspberry Pi.
 
 1. `job-finder profile import cv.pdf -p <name>` reads the CV with Claude and
    fills in the profile (skills, roles, suggested search queries).
-2. Each run collects jobs from the enabled sources (Remotive, JSearch),
+2. Each run collects jobs from the enabled sources (Remotive, Remote OK,
+   Himalayas, JSearch),
    normalizes and deduplicates them, applies the profile's hard filters and
    ranks the rest with BM25.
 3. The best candidates are scored by Claude (fit 0-100, strengths, gaps,
@@ -47,6 +48,14 @@ The database lives in the `./data` volume. Migrations run on startup.
 
 ## Sources and their terms
 
-Each connector follows its source's terms: Remotive is called at most 4 times a
-day and every job links back to and credits Remotive; JSearch respects the
-plan's monthly quota. Sources whose terms forbid aggregation are not supported.
+Each connector follows its source's terms, recorded in its docstring:
+
+- **Remotive:** at most 4 calls a day; every job links back to and credits
+  Remotive.
+- **Remote OK:** one call per run; every job links back to and credits Remote OK.
+- **Himalayas:** a few searches per run (an optional free key raises the
+  limit); jobs open through Himalayas' application link, credit Himalayas, and
+  expired jobs are dropped. Jobs are not passed on to third parties.
+- **JSearch:** stays within the plan's monthly quota.
+
+Sources whose terms forbid aggregation are not supported.
