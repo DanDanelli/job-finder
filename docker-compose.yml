@@ -1,0 +1,14 @@
+services:
+  job-finder:
+    build: .
+    image: job-finder:latest
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      JOBFINDER_DATA_DIR: /data
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data
