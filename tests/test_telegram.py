@@ -371,3 +371,16 @@ def test_log_does_not_expose_the_bot_token(caplog: pytest.LogCaptureFixture) -> 
     with caplog.at_level(logging.INFO):
         logging.getLogger("httpx").info("POST https://api.telegram.org/bot123:SECRET/getMe")
     assert "SECRET" not in caplog.text
+
+
+def test_long_country_lists_are_shortened() -> None:
+    from job_finder.telegram.digest import _short_places
+
+    many = "Anguilla, Antigua and Barbuda, Argentina, Aruba, Brazil, Chile"
+    assert _short_places(many) == "Brazil, Anguilla, Antigua and Barbuda +3"
+    assert (
+        _short_places("Argentina, Brazil, Colombia, Mexico")
+        == "Argentina, Brazil, Colombia, Mexico"
+    )
+    assert _short_places("São Paulo, SP, BR") == "São Paulo, SP, BR"
+    assert _short_places(None) is None

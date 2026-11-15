@@ -160,8 +160,23 @@ def format_header(d: Digest, lang: str) -> str:
 
 def _location(item: DigestItem, lang: str) -> str:
     mode = t(lang, f"work_mode.{item.work_mode}") if item.work_mode in WORK_MODES else None
-    parts = [p for p in (mode, item.location_text) if p]
+    parts = [p for p in (mode, _short_places(item.location_text)) if p]
     return " · ".join(parts) or t(lang, "location.unknown")
+
+
+def _short_places(text: str | None, keep: int = 3) -> str | None:
+    """ "Anguilla, Antigua and Barbuda, Argentina, ..." (some sources list 50 countries)
+    becomes "Anguilla, Antigua and Barbuda, Argentina +47". Brazil, when listed, stays
+    in view."""
+    if not text:
+        return text
+    places = [p.strip() for p in text.split(",") if p.strip()]
+    if len(places) <= keep + 1:
+        return text
+    if "Brazil" in places[keep:]:
+        places.remove("Brazil")
+        places.insert(0, "Brazil")
+    return f"{', '.join(places[:keep])} +{len(places) - keep}"
 
 
 def _salary(item: DigestItem, lang: str) -> str | None:
