@@ -146,7 +146,9 @@ class MatchDB(Timestamps, Base):
 
     job: Mapped[JobDB] = relationship(back_populates="matches")
     profile: Mapped[ProfileDB] = relationship(back_populates="matches")
-    feedback: Mapped[list["FeedbackDB"]] = relationship(back_populates="match")
+    feedback: Mapped[list["FeedbackDB"]] = relationship(
+        back_populates="match", order_by="FeedbackDB.id"
+    )
 
 
 class FeedbackDB(Base):
@@ -154,8 +156,10 @@ class FeedbackDB(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     match_id: Mapped[int] = mapped_column(ForeignKey("matches.id", ondelete="CASCADE"), index=True)
-    action: Mapped[str] = mapped_column(String(16))  # save | dismiss
+    action: Mapped[str] = mapped_column(String(16))  # save | dismiss | restore | note
     origin: Mapped[str] = mapped_column(String(16))  # telegram | web
+    # The person's note on the job ("why"). The newest non-null one is the current note;
+    # "" means they cleared it. See repo.latest_note.
     comment: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 

@@ -270,6 +270,23 @@ def test_feedback_from_another_profile_is_rejected(engine: Engine) -> None:
         assert s.get_one(MatchDB, ids["A"]).status == MatchStatus.NEW
 
 
+def test_reply_to_a_job_message_becomes_its_note(engine: Engine) -> None:
+    ids = prepare(engine, {"A": 90})
+    buttons = [f"fb:s:{ids['A']}", f"fb:d:{ids['A']}"]
+    assert actions.match_in_buttons(buttons) == ids["A"]
+    assert actions.match_in_buttons(["other", "fb:s:x"]) is None
+
+    assert actions.record_note(engine, CHAT_DANIEL, ids["A"], "  consultancy  ") == "consultancy"
+    assert actions.record_note(engine, CHAT_PARTNER, ids["A"], "not mine") is None
+    with session(engine) as s:
+        m = s.get_one(MatchDB, ids["A"])
+        assert repo.latest_note(m.feedback) == "consultancy"
+        assert m.status == MatchStatus.NEW  # a note alone does not decide
+    assert actions.record_note(engine, CHAT_DANIEL, ids["A"], "   ") == ""
+    with session(engine) as s:
+        assert repo.latest_note(s.get_one(MatchDB, ids["A"]).feedback) is None
+
+
 def test_saved_and_status(engine: Engine) -> None:
     ids = prepare(engine, {"A & B": 90, "C": 70})
     pid = profile_id(engine, "daniel")
@@ -358,6 +375,56 @@ def test_bot_registers_the_commands_and_their_aliases(engine: Engine) -> None:
     markup = keyboard([Button("👍", callback="fb:s:1"), Button("🔗", url="https://x.example")])
     row = markup.inline_keyboard[0]
     assert (row[0].callback_data, row[1].url) == ("fb:s:1", "https://x.example")
+
+
+def test_bot_turns_a_reply_to_a_job_into_a_note(engine: Engine) -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    from telegram.ext import MessageHandler
+
+    from job_finder.telegram.bot import keyboard, make_application, register_handlers
+    from job_finder.telegram.digest import job_buttons
+
+    ids = prepare(engine, {"A": 90})
+    app = make_application("123456:TEST")
+    register_handlers(app, engine, Settings(), Scheduler(engine, Settings(), None))
+    (text_handler,) = [h for h in app.handlers[0] if isinstance(h, MessageHandler)]
+    answers: list[str] = []
+    evaluated: list[str] = []
+
+    async def reply_text(text: str, **kw: Any) -> None:
+        answers.append(text)
+
+    def update(text: str, replied: Any) -> Any:
+        message = SimpleNamespace(text=text, reply_to_message=replied, reply_text=reply_text)
+        return SimpleNamespace(
+            effective_chat=SimpleNamespace(id=CHAT_DANIEL), effective_message=message
+        )
+
+    bot = SimpleNamespace(is_bot=True)
+    job_message = SimpleNamespace(
+        from_user=bot, reply_markup=keyboard(job_buttons(ids["A"], "https://x.example", "en"))
+    )
+    other_message = SimpleNamespace(from_user=bot, reply_markup=None)
+
+    async def run() -> None:
+        import job_finder.telegram.bot as bot_module
+
+        original = bot_module.Batcher.add
+        bot_module.Batcher.add = lambda self, chat, text: evaluated.append(text)  # type: ignore[method-assign]
+        try:
+            await text_handler.callback(update("they only hire PJ", job_message), None)
+            await text_handler.callback(update("hello?", other_message), None)
+        finally:
+            bot_module.Batcher.add = original  # type: ignore[method-assign]
+
+    asyncio.run(run())
+    assert answers[0].startswith("Note saved")
+    assert answers[1].startswith("To add a note, reply to a job's message")
+    assert evaluated == []  # neither reply was sent to Claude as a job
+    with session(engine) as s:
+        assert repo.latest_note(s.get_one(MatchDB, ids["A"]).feedback) == "they only hire PJ"
 
 
 def test_log_does_not_expose_the_bot_token(caplog: pytest.LogCaptureFixture) -> None:

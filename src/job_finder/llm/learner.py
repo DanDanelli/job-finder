@@ -88,7 +88,6 @@ def decisions(engine: Engine, profile_id: int, limit: int = MAX_DECISIONS) -> li
         result = []
         for m in matches:
             job = repo.job_from(m.job)
-            notes = [f.comment for f in m.feedback if f.comment]
             result.append(
                 Decision(
                     saved=m.status == MatchStatus.SAVED,
@@ -99,7 +98,7 @@ def decisions(engine: Engine, profile_id: int, limit: int = MAX_DECISIONS) -> li
                     contract=job.contract_type.value if job.contract_type else None,
                     score=m.score,
                     summary=m.summary,
-                    note=notes[-1] if notes else None,
+                    note=repo.latest_note(m.feedback),
                 )
             )
         return result

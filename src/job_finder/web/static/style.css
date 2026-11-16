@@ -168,3 +168,4 @@ details summary { cursor: pointer; color: var(--muted); font-size: .85rem; }
 .errors { margin: 4px 0 0; padding-left: 18px; font-size: .82rem; color: var(--muted); overflow-wrap: anywhere; }
 .meter { height: 8px; background: var(--border); border-radius: 999px; overflow: hidden; }
 .meter span { display: block; height: 100%; background: var(--accent); }
+.actions input.note { flex: 1 1 100%; padding: 6px 10px; font-size: .9rem; }

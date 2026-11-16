@@ -168,8 +168,34 @@ def register_handlers(
 
     @authorized
     async def free_text(update: Update, context: Context, profile: ChatProfile) -> None:
-        if update.effective_chat and update.effective_message and update.effective_message.text:
-            batcher.add(update.effective_chat.id, update.effective_message.text)
+        message, chat = update.effective_message, update.effective_chat
+        if not (chat and message and message.text):
+            return
+        # A reply to a job's message (one with 👍/👎) is a note on that job. Any other
+        # reply to the bot is not a job to evaluate either (that would spend Claude on
+        # a note): it gets a hint instead.
+        target = message.reply_to_message
+        if target is not None and target.from_user is not None and target.from_user.is_bot:
+            markup = target.reply_markup
+            callbacks = [
+                b.callback_data
+                for row in (markup.inline_keyboard if markup else ())
+                for b in row
+                if isinstance(b.callback_data, str)
+            ]
+            match_id = actions.match_in_buttons(callbacks)
+            if match_id is None:
+                await reply(update, t(lang, "feedback.reply_hint"))
+                return
+            note = await asyncio.to_thread(
+                actions.record_note, engine, chat.id, match_id, message.text
+            )
+            if note is None:
+                await reply(update, t(lang, "feedback.invalid"))
+            else:
+                await reply(update, t(lang, "feedback.noted" if note else "feedback.note_cleared"))
+            return
+        batcher.add(chat.id, message.text)
 
     @authorized
     async def search(update: Update, context: Context, profile: ChatProfile) -> None:

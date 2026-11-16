@@ -53,8 +53,14 @@ MESSAGES: dict[str, dict[str, str]] = {
         "pause.on": "⏸ Digest paused. Send /{command} again to resume.",
         "pause.off": "▶️ Digest resumed.",
         "feedback.invalid": "Invalid action.",
-        "feedback.saved": "Saved ✅",
-        "feedback.dismissed": "Dismissed",
+        "feedback.saved": "Saved ✅ Reply to the job's message to say why.",
+        "feedback.dismissed": "Dismissed. Reply to the job's message to say why.",
+        "feedback.noted": "Note saved ✍️ Claude takes it into account.",
+        "feedback.note_cleared": "Note removed.",
+        "feedback.reply_hint": (
+            "To add a note, reply to a job's message (the one with 👍/👎). To evaluate a "
+            "job, send its link as a new message."
+        ),
         "saved.none": "No saved jobs yet. Use 👍 on the digest's jobs.",
         "saved.title": "<b>Saved jobs</b> ({n})",
         "status.paused": " · ⏸ paused",
@@ -132,6 +138,9 @@ MESSAGES: dict[str, dict[str, str]] = {
         "web.action.dismiss": "Dismiss",
         "web.action.restore": "Back to new",
         "web.action.open": "Open",
+        "web.note.label": "Note",
+        "web.note.placeholder": "Why? (optional; Claude learns from it)",
+        "web.note.save": "Save note",
         "web.profile.title": "Profile",
         "web.profile.searches": "Searches",
         "web.profile.queries.hint": (
@@ -357,8 +366,14 @@ MESSAGES: dict[str, dict[str, str]] = {
         "pause.on": "⏸ Digest pausado. Mande /{command} de novo para retomar.",
         "pause.off": "▶️ Digest retomado.",
         "feedback.invalid": "Ação inválida.",
-        "feedback.saved": "Salva ✅",
-        "feedback.dismissed": "Descartada",
+        "feedback.saved": "Salva ✅ Responda à mensagem da vaga para dizer por quê.",
+        "feedback.dismissed": "Descartada. Responda à mensagem da vaga para dizer por quê.",
+        "feedback.noted": "Observação guardada ✍️ O Claude vai levar em conta.",
+        "feedback.note_cleared": "Observação removida.",
+        "feedback.reply_hint": (
+            "Para deixar uma observação, responda à mensagem de uma vaga (a que tem 👍/👎). "
+            "Para avaliar uma vaga, mande o link numa mensagem nova."
+        ),
         "saved.none": "Nenhuma vaga salva ainda. Use 👍 nas vagas do digest.",
         "saved.title": "<b>Vagas salvas</b> ({n})",
         "status.paused": " · ⏸ pausado",
@@ -435,6 +450,9 @@ MESSAGES: dict[str, dict[str, str]] = {
         "web.action.dismiss": "Descartar",
         "web.action.restore": "Voltar para novas",
         "web.action.open": "Abrir",
+        "web.note.label": "Observação",
+        "web.note.placeholder": "Por quê? (opcional; o Claude aprende com isso)",
+        "web.note.save": "Salvar observação",
         "web.profile.title": "Perfil",
         "web.profile.searches": "Buscas",
         "web.profile.queries.hint": (

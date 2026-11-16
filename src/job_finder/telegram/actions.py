@@ -66,6 +66,29 @@ def record_feedback(
         return FeedbackResult(match.id, status, match.job.url)
 
 
+def match_in_buttons(callbacks: list[str]) -> int | None:
+    """The match a job message is about, from its buttons' `fb:<s|d>:<id>` data."""
+    for data in callbacks:
+        parts = data.split(":")
+        if len(parts) == 3 and parts[0] == "fb" and parts[2].isdigit():
+            return int(parts[2])
+    return None
+
+
+def record_note(
+    engine: Engine, chat_id: int, match_id: int, text: str, origin: str = "telegram"
+) -> str | None:
+    """Saves a reply to a job's message as the person's note on it. Returns the note
+    ("" when it came out empty, which clears it), or None if the match is not this
+    chat's profile's."""
+    with session(engine) as s:
+        profile = repo.profile_for_chat(s, chat_id)
+        match = s.get(MatchDB, match_id)
+        if profile is None or match is None or match.profile_id != profile.id:
+            return None
+        return repo.add_note(s, match, text, origin) or ""
+
+
 def toggle_pause(engine: Engine, profile_id: int) -> bool:
     with session(engine) as s:
         p = s.get_one(ProfileDB, profile_id)

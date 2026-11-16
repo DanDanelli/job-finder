@@ -73,6 +73,22 @@ def test_propose_stores_a_draft_and_approval_moves_it_into_use(engine: Engine) -
     assert (st.rules, st.draft) == (["Dismisses consultancies", "Likes platform teams"], None)
 
 
+def test_the_latest_note_is_the_one_claude_sees(engine: Engine) -> None:
+    from job_finder.db import repo
+
+    pid = add_profile(engine, "daniel")
+    decide(engine, "daniel", 5, note="first thought")
+    with session(engine) as s:
+        m = s.scalars(select(MatchDB).where(MatchDB.profile_id == pid)).first()
+        assert m is not None
+        repo.add_note(s, m, "actually: they want onsite in Lisbon", "telegram")
+    c = fake_client(engine, proposing())
+    learner.propose(engine, c, pid, model="m", language="en", now=datetime.now(UTC))
+    message = c.anthropic.messages.calls[0]["messages"][0]["content"]
+    assert message.count("their note: first thought") == 4
+    assert "their note: actually: they want onsite in Lisbon" in message
+
+
 def test_same_rules_as_in_use_leave_no_draft(engine: Engine) -> None:
     pid = add_profile(engine, "daniel")
     decide(engine, "daniel", 5)

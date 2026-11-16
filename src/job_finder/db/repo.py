@@ -1,11 +1,12 @@
 """Data access: conversion between tables and domain models."""
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 
 from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.orm import Session
 
-from job_finder.db.models import JobDB, JobSourceDB, MatchDB, ProfileDB, utcnow
+from job_finder.db.models import FeedbackDB, JobDB, JobSourceDB, MatchDB, ProfileDB, utcnow
 from job_finder.domain import (
     ContractType,
     Filters,
@@ -194,3 +195,29 @@ def candidates(s: Session, profile_id: int, since: datetime) -> list[JobDB]:
     return list(
         s.scalars(select(JobDB).where(no_match, recent, from_some_source).order_by(JobDB.id))
     )
+
+
+MAX_NOTE_CHARS = 500
+
+
+def clean_note(text: str | None) -> str | None:
+    """None stays None (no change); otherwise trimmed and cut to MAX_NOTE_CHARS."""
+    if text is None:
+        return None
+    return " ".join(text.split())[:MAX_NOTE_CHARS]
+
+
+def latest_note(feedback: Sequence[FeedbackDB]) -> str | None:
+    """The match's current note: the newest comment set ("" = cleared)."""
+    for f in sorted(feedback, key=lambda f: f.id or 0, reverse=True):
+        if f.comment is not None:
+            return f.comment or None
+    return None
+
+
+def add_note(s: Session, match: MatchDB, text: str, origin: str) -> str | None:
+    """Records the person's note on a match (also before they decide). Returns it."""
+    note = clean_note(text) or ""
+    s.add(FeedbackDB(match_id=match.id, action="note", origin=origin, comment=note))
+    s.flush()
+    return note or None

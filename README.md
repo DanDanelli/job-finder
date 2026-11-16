@@ -24,7 +24,9 @@ on a Raspberry Pi.
    most like it go into the prompt, so Claude calibrates to your taste. Once a
    week Claude also reads all your decisions and proposes rules ("dismisses
    outsourcing consultancies"); they count only after you approve or edit them
-   on the site.
+   on the site. A note on why you saved or dismissed a job helps the most: type
+   it in the field on the job's card on the site, or reply to the job's message
+   on Telegram.
 
 Bot messages and Claude's text follow `JOBFINDER_LANGUAGE` (`en` or `pt-BR`).
 

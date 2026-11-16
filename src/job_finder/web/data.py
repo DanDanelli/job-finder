@@ -41,6 +41,7 @@ class JobCard:
     item: DigestItem
     status: str
     posted_at: datetime | None
+    note: str | None = None
 
 
 def counts(engine: Engine, profile_id: int) -> dict[str, int]:
@@ -85,29 +86,49 @@ def job_cards(
             MatchDB.score.is_not(None),
             MatchDB.score >= min_score,
         )
-        .options(selectinload(MatchDB.job).selectinload(JobDB.sources))
+        .options(
+            selectinload(MatchDB.job).selectinload(JobDB.sources),
+            selectinload(MatchDB.feedback),
+        )
         .order_by(*order, MatchDB.id.desc())
         .limit(limit)
     )
     if work_mode:
         q = q.where(JobDB.work_mode == work_mode)
     with session(engine, commit=False) as s:
-        return [JobCard(digest_item(m), m.status, m.job.posted_at) for m in s.scalars(q)]
+        return [
+            JobCard(digest_item(m), m.status, m.job.posted_at, repo.latest_note(m.feedback))
+            for m in s.scalars(q)
+        ]
 
 
-def set_status(engine: Engine, profile_id: int, match_id: int, action: str) -> bool:
-    """Applies save / dismiss / restore. False if the match is not this profile's."""
-    if action not in ACTIONS:
+def set_status(
+    engine: Engine, profile_id: int, match_id: int, action: str, note: str | None = None
+) -> bool:
+    """Applies save / dismiss / restore, or "note" (only the note). `note` is the note
+    field as sent (None: the form had none); it is recorded when it changed. False if
+    the match is not this profile's."""
+    if action not in ACTIONS and action != "note":
         return False
-    status, feedback = ACTIONS[action]
     with session(engine) as s:
         match = s.get(MatchDB, match_id)
         if match is None or match.profile_id != profile_id:
             return False
         if match.status not in (*TABS.values(),):
             return False  # pending or skipped: not on the site yet
+        note = repo.clean_note(note)
+        changed = note is not None and note != (repo.latest_note(match.feedback) or "")
+        if action == "note":
+            if changed:
+                repo.add_note(s, match, note or "", "web")
+            return True
+        status, feedback = ACTIONS[action]
         match.status = status
-        s.add(FeedbackDB(match_id=match.id, action=feedback, origin="web"))
+        s.add(
+            FeedbackDB(
+                match_id=match.id, action=feedback, origin="web", comment=note if changed else None
+            )
+        )
         return True
 
 

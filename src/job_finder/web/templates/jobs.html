@@ -61,9 +61,13 @@
     </p>
     <form method="post" action="/matches/{{ j.match_id }}" class="actions">
       <input type="hidden" name="back" value="{{ query }}">
+      <input type="hidden" name="has_note" value="1">
+      <input type="text" name="note" value="{{ card.note or '' }}" maxlength="500" class="note"
+             placeholder="{{ t('web.note.placeholder') }}" aria-label="{{ t('web.note.label') }}">
       {% if tab != "saved" %}<button name="action" value="save">{{ t("web.action.save") }}</button>{% endif %}
       {% if tab != "dismissed" %}<button name="action" value="dismiss" class="secondary">{{ t("web.action.dismiss") }}</button>{% endif %}
       {% if tab != "new" %}<button name="action" value="restore" class="secondary">{{ t("web.action.restore") }}</button>{% endif %}
+      {% if tab != "new" %}<button name="action" value="note" class="secondary">{{ t("web.note.save") }}</button>{% endif %}
       <a class="button secondary" href="{{ j.url }}" target="_blank" rel="noopener noreferrer">{{ t("web.action.open") }}</a>
     </form>
   </div>

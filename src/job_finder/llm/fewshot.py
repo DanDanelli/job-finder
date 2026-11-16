@@ -59,7 +59,6 @@ def load_examples(s: Session, profile_id: int, limit: int = POOL) -> list[Exampl
     examples = []
     for m in matches:
         job = repo.job_from(m.job)
-        comments = [f.comment for f in m.feedback if f.comment]
         examples.append(
             Example(
                 match_id=m.id,
@@ -69,7 +68,7 @@ def load_examples(s: Session, profile_id: int, limit: int = POOL) -> list[Exampl
                 location=job.location_text,
                 work_mode=job.work_mode.value,
                 score=m.score,
-                comment=comments[-1] if comments else None,
+                comment=repo.latest_note(m.feedback),
                 document=title_terms(job.title),
             )
         )

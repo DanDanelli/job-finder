@@ -257,8 +257,13 @@ def mount_site(
         match_id: int,
         action: Annotated[str, Form()],
         back: Annotated[str, Form()] = "",
+        note: Annotated[str | None, Form()] = None,
+        has_note: Annotated[str | None, Form()] = None,
     ) -> Response:
-        if not data.set_status(engine, profile.id, match_id, action):
+        # FastAPI turns an empty field into None; `has_note` tells "cleared" from "absent".
+        if has_note and note is None:
+            note = ""
+        if not data.set_status(engine, profile.id, match_id, action, note):
             return Response(status_code=404)
         # Only a query string of our own: never redirect elsewhere.
         target = "/jobs?" + back if back and "://" not in back and "\\" not in back else "/jobs"

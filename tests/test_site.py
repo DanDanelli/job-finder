@@ -269,6 +269,56 @@ def test_save_dismiss_restore(engine: Engine, client: TestClient) -> None:
     assert actions == [("save", "web"), ("dismiss", "web"), ("restore", "web")]
 
 
+def test_note_with_a_decision_and_on_its_own(engine: Engine, client: TestClient) -> None:
+    add_profile(engine, "daniel")
+    (match_id,) = add_matches(engine, "daniel", [raw("1", "Cloud Architect")])
+    login(client)
+    assert 'name="note" value=""' in client.get("/jobs").text
+
+    form = {"action": "dismiss", "note": "  outsourcing   consultancy "}
+    client.post(f"/matches/{match_id}", data=form)
+    page = client.get("/jobs?tab=dismissed").text
+    assert 'value="outsourcing consultancy"' in page and "Save note" in page
+    # The same note sent again with another action is not recorded twice.
+    client.post(
+        f"/matches/{match_id}", data={"action": "restore", "note": "outsourcing consultancy"}
+    )
+    client.post(
+        f"/matches/{match_id}", data={"action": "dismiss", "note": "outsourcing consultancy"}
+    )
+    # Editing only the note, then clearing it.
+    client.post(f"/matches/{match_id}", data={"action": "note", "note": "body shop"})
+    client.post(f"/matches/{match_id}", data={"action": "note", "note": "body shop"})
+    with session(engine) as s:
+        m = s.get_one(MatchDB, match_id)
+        rows = [(f.action, f.comment) for f in m.feedback]
+        assert rows == [
+            ("dismiss", "outsourcing consultancy"),
+            ("restore", None),
+            ("dismiss", None),
+            ("note", "body shop"),
+        ]
+        assert repo.latest_note(m.feedback) == "body shop"
+        assert m.status == MatchStatus.DISMISSED  # a note does not change the status
+    # Without the marker an empty field means "no note field": nothing changes.
+    client.post(f"/matches/{match_id}", data={"action": "note", "note": ""})
+    with session(engine) as s:
+        assert repo.latest_note(s.get_one(MatchDB, match_id).feedback) == "body shop"
+    client.post(f"/matches/{match_id}", data={"action": "note", "note": "", "has_note": "1"})
+    with session(engine) as s:
+        assert repo.latest_note(s.get_one(MatchDB, match_id).feedback) is None
+    assert 'name="note" value=""' in client.get("/jobs?tab=dismissed").text
+
+
+def test_note_is_cut_to_the_limit(engine: Engine, client: TestClient) -> None:
+    add_profile(engine, "daniel")
+    (match_id,) = add_matches(engine, "daniel", [raw("1", "Cloud Architect")])
+    login(client)
+    client.post(f"/matches/{match_id}", data={"action": "save", "note": "x" * 2000})
+    with session(engine) as s:
+        assert len(repo.latest_note(s.get_one(MatchDB, match_id).feedback) or "") == 500
+
+
 def test_cannot_touch_another_profiles_match(engine: Engine, client: TestClient) -> None:
     add_profile(engine, "daniel")
     add_profile(engine, "partner")
@@ -277,6 +327,9 @@ def test_cannot_touch_another_profiles_match(engine: Engine, client: TestClient)
 
     assert client.post(f"/matches/{theirs}", data={"action": "dismiss"}).status_code == 404
     assert client.post(f"/matches/{theirs}", data={"action": "nonsense"}).status_code == 404
+    assert (
+        client.post(f"/matches/{theirs}", data={"action": "note", "note": "x"}).status_code == 404
+    )
     with session(engine) as s:
         assert s.get_one(MatchDB, theirs).status == MatchStatus.NEW
 
