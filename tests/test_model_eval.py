@@ -20,6 +20,7 @@ from job_finder.llm.model_eval import (
     metrics,
     precision_at,
     run_eval,
+    sample,
 )
 
 JOBS = [
@@ -182,11 +183,22 @@ def test_the_cost_cap_stops_the_eval(engine: Engine) -> None:
     assert c.anthropic.messages.calls == []
 
 
-def test_limit_takes_the_first_labeled_jobs(engine: Engine) -> None:
+def test_limit_samples_saved_and_dismissed_alternately(engine: Engine) -> None:
     profile_id = label(engine)
     c = client(engine, by_model({HAIKU: PERFECT}))
     report = run_eval(engine, c, profile_id, models=[HAIKU], language="en", limit=2)
     assert len(report.rows) == 2 == len(c.anthropic.messages.calls)
+    assert sorted(r.labeled.saved for r in report.rows) == [False, True]
+
+
+def test_sample_fills_from_the_bigger_group_when_the_other_runs_out() -> None:
+    from job_finder.llm.model_eval import Labeled
+
+    job = raw("1", "x")
+    items = [Labeled(i, i == 4, job, None) for i in range(1, 7)]  # type: ignore[arg-type]
+    chosen = sample(items, 4)
+    assert [x.match_id for x in chosen] == [1, 2, 3, 4]  # one saved (4) and three dismissed
+    assert sample(items, None) == items
 
 
 def test_estimate_uses_past_scoring_tokens(engine: Engine) -> None:

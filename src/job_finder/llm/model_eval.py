@@ -66,6 +66,20 @@ def load_labeled(engine: Engine, profile_id: int) -> list[Labeled]:
         ]
 
 
+def sample(labeled: Sequence[Labeled], limit: int | None) -> list[Labeled]:
+    """Up to `limit` jobs, alternating saved and dismissed (oldest first in each group)
+    while both last, so even a small sample has both labels."""
+    if limit is None or limit >= len(labeled):
+        return list(labeled)
+    groups = [[x for x in labeled if x.saved], [x for x in labeled if not x.saved]]
+    chosen: list[Labeled] = []
+    while len(chosen) < limit:
+        for group in groups:
+            if group and len(chosen) < limit:
+                chosen.append(group.pop(0))
+    return sorted(chosen, key=lambda x: x.match_id)
+
+
 # --- cost estimate ----------------------------------------------------------------
 
 
@@ -225,9 +239,7 @@ def run_eval(
     with session(engine, commit=False) as s:
         profile = repo.profile_from(s.get_one(ProfileDB, profile_id))
         decisions = load_examples(s, profile_id)
-    labeled = load_labeled(engine, profile_id)
-    if limit is not None:
-        labeled = labeled[:limit]
+    labeled = sample(load_labeled(engine, profile_id), limit)
     report = EvalReport(profile.name, list(models), [Row(item) for item in labeled])
 
     for model in models:

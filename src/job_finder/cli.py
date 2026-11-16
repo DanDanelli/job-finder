@@ -460,14 +460,15 @@ def eval_models(
         typer.Option("--model", "-m", help="Model to evaluate (repeatable)."),
     ] = None,
     limit: Annotated[
-        int | None, typer.Option("--limit", min=1, help="Only the first N labeled jobs.")
+        int | None,
+        typer.Option("--limit", min=1, help="A sample of N jobs, saved and dismissed alternating."),
     ] = None,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the cost confirmation.")] = False,
 ) -> None:
     """Scores the profile's saved and dismissed jobs again with each model and measures how
     well the scores separate them. Spends Claude credit; writes only to llm_costs."""
     from job_finder.llm.client import make_client
-    from job_finder.llm.model_eval import estimate, load_labeled, run_eval
+    from job_finder.llm.model_eval import estimate, load_labeled, run_eval, sample
 
     settings = get_settings()
     if settings.anthropic_api_key is None:
@@ -475,9 +476,9 @@ def eval_models(
     models = model or DEFAULT_EVAL_MODELS
     engine = _engine()
     profile_id = _profile_id(engine, profile)
-    labeled = load_labeled(engine, profile_id)
-    jobs = min(len(labeled), limit) if limit else len(labeled)
-    saved = sum(item.saved for item in labeled[:jobs])
+    labeled = sample(load_labeled(engine, profile_id), limit)
+    jobs = len(labeled)
+    saved = sum(item.saved for item in labeled)
     if saved == 0 or saved == jobs:
         raise typer.BadParameter(
             f"'{profile}' needs both saved and dismissed jobs ({saved} saved of {jobs})"
