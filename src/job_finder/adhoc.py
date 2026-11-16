@@ -29,7 +29,7 @@ from job_finder.db import repo
 from job_finder.db.models import JobSourceDB, MatchDB, ProfileDB
 from job_finder.db.session import session
 from job_finder.domain import MatchStatus, RawJob
-from job_finder.llm import scorer
+from job_finder.llm import fewshot, scorer
 from job_finder.llm.client import LLMClient
 from job_finder.pipeline.dedup import dedup_key
 from job_finder.pipeline.filters import discard_reason
@@ -275,11 +275,18 @@ def evaluate_message(
         match_id = match.id
         full_job = repo.job_from(job_db)  # may already exist with better data
         reason = discard_reason(full_job, profile.filters, now)
+        examples = fewshot.similar(fewshot.load_examples(s, profile_id), full_job)
     if reason:
         notices.append(Notice("evaluate.would_discard", {"reason": reason}))
 
     fit = scorer.evaluate(
-        client, profile, full_job, model=model, language=language, profile_id=profile_id
+        client,
+        profile,
+        full_job,
+        model=model,
+        language=language,
+        profile_id=profile_id,
+        examples=examples,
     )
     with session(engine) as s:
         m = s.get_one(MatchDB, match_id)

@@ -3,7 +3,7 @@
 import asyncio
 import contextlib
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -12,6 +12,7 @@ from sqlalchemy import Engine, text
 from job_finder import __version__
 from job_finder.config import Settings, get_settings
 from job_finder.db.session import make_engine
+from job_finder.llm.client import LLMClient
 from job_finder.scheduler import Scheduler
 from job_finder.web.cv import Extractor
 
@@ -50,13 +51,16 @@ async def _services(
         await bot_app.updater.start_polling()
         log.info("Telegram bot running")
 
-    task = asyncio.create_task(scheduler.loop(), name="scheduler")
+    tasks = [asyncio.create_task(scheduler.loop(), name="scheduler")]
+    if settings.backup_enabled:
+        tasks.append(asyncio.create_task(scheduler.backup_loop(), name="backup"))
     try:
         yield
     finally:
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+        for task in tasks:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
         if bot_app is not None:
             assert bot_app.updater is not None
             await bot_app.updater.stop()
@@ -64,8 +68,14 @@ async def _services(
             await bot_app.shutdown()
 
 
-def create_app(settings: Settings | None = None, *, extract: Extractor | None = None) -> FastAPI:
-    """`extract` replaces the CV reader (Claude) in tests."""
+def create_app(
+    settings: Settings | None = None,
+    *,
+    extract: Extractor | None = None,
+    llm: Callable[[], LLMClient] | None = None,
+) -> FastAPI:
+    """`extract` (the CV reader) and `llm` (the rules learner's client) replace Claude in
+    tests."""
     settings = settings or get_settings()
     engine = make_engine(settings.resolved_database_url)
     scheduler = Scheduler(engine, settings, None)
@@ -79,7 +89,7 @@ def create_app(settings: Settings | None = None, *, extract: Extractor | None = 
 
     from job_finder.web.site import mount_site
 
-    mount_site(app, engine, settings, scheduler, extract=extract)
+    mount_site(app, engine, settings, scheduler, extract=extract, llm=llm)
 
     @app.get("/health")
     def health() -> dict[str, str]:

@@ -69,6 +69,12 @@ class ProfileDB(Timestamps, Base):
     paused: Mapped[bool] = mapped_column(default=False, server_default=sa_false())
     # Site login (scrypt, see web/auth.py). None = cannot sign in to the site.
     password_hash: Mapped[str | None] = mapped_column(String(256))
+    # Learning from feedback (llm/learner.py): rules the person approved, which go into
+    # the scoring prompt; Claude's latest proposal waiting for review; when Claude last
+    # looked at the feedback.
+    learned_rules: Mapped[list[Any]] = mapped_column(default=list, server_default="[]")
+    rules_draft: Mapped[list[Any] | None] = mapped_column(JSON)
+    rules_checked_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
     matches: Mapped[list["MatchDB"]] = relationship(back_populates="profile")
 

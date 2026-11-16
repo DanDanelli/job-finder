@@ -244,6 +244,39 @@ MESSAGES: dict[str, dict[str, str]] = {
         "web.account.wrong_current": "The current password is wrong.",
         "web.account.mismatch": "The two new passwords differ.",
         "web.account.too_short": "The new password needs at least {n} characters.",
+        "web.learned.title": "Learned from your feedback",
+        "web.learned.intro": (
+            "Rules Claude found in the jobs you saved and dismissed. Once you approve "
+            "them, they count when each new job is scored. Edit them freely."
+        ),
+        "web.learned.counts": "{saved} saved and {dismissed} dismissed jobs so far",
+        "web.learned.checked": "Claude last looked {when}",
+        "web.learned.thinking": "Claude is reading your decisions. This page updates itself.",
+        "web.learned.failed": "Could not suggest rules: {error}",
+        "web.learned.draft": "Suggested rules, waiting for you",
+        "web.learned.draft_hint": (
+            "Edit, delete or add lines, then approve. Until then, none of these count."
+        ),
+        "web.learned.current": "Rules in use",
+        "web.learned.hint": "One rule per line, at most {n}. An empty box removes them all.",
+        "web.learned.approve": "Approve these rules",
+        "web.learned.save": "Save",
+        "web.learned.discard": "Discard the suggestion",
+        "web.learned.suggest_title": "Ask Claude",
+        "web.learned.suggest_hint": (
+            "Claude also does this weekly on its own when you have new decisions."
+        ),
+        "web.learned.suggest": "Suggest rules now",
+        "web.learned.need_more": "Save or dismiss at least {n} jobs first.",
+        "web.learned.saved": "Saved. The next scorings use these rules.",
+        "web.learned.discarded": "Suggestion discarded.",
+        "web.learned.no_change": "Claude found nothing new.",
+        "web.learned.summary": "{n} rules in use",
+        "web.learned.waiting": "new suggestion waiting",
+        "learn.proposed": (
+            "💡 Claude suggested {n} rules from the jobs you saved and dismissed. They only "
+            "count after you approve them on the site: Profile → Learned from your feedback."
+        ),
         "web.cv.saved": "Saved.",
         "web.cv.saved_terms": "Saved. {n} new searches added to your profile.",
         "web.cv.no_file": "Choose a PDF file.",
@@ -520,6 +553,41 @@ MESSAGES: dict[str, dict[str, str]] = {
         "web.account.wrong_current": "A senha atual está errada.",
         "web.account.mismatch": "As duas senhas novas são diferentes.",
         "web.account.too_short": "A nova senha precisa de pelo menos {n} caracteres.",
+        "web.learned.title": "Aprendido com seu feedback",
+        "web.learned.intro": (
+            "Regras que o Claude encontrou nas vagas que você salvou e descartou. Depois "
+            "que você aprova, elas contam na nota de cada vaga nova. Edite à vontade."
+        ),
+        "web.learned.counts": "{saved} vagas salvas e {dismissed} descartadas até agora",
+        "web.learned.checked": "o Claude olhou pela última vez {when}",
+        "web.learned.thinking": (
+            "O Claude está lendo suas decisões. Esta página se atualiza sozinha."
+        ),
+        "web.learned.failed": "Não foi possível sugerir regras: {error}",
+        "web.learned.draft": "Regras sugeridas, esperando por você",
+        "web.learned.draft_hint": (
+            "Edite, apague ou acrescente linhas e aprove. Até lá, nenhuma conta."
+        ),
+        "web.learned.current": "Regras em uso",
+        "web.learned.hint": "Uma regra por linha, no máximo {n}. Caixa vazia remove todas.",
+        "web.learned.approve": "Aprovar estas regras",
+        "web.learned.save": "Salvar",
+        "web.learned.discard": "Descartar a sugestão",
+        "web.learned.suggest_title": "Pedir ao Claude",
+        "web.learned.suggest_hint": (
+            "O Claude também faz isso sozinho toda semana quando há decisões novas."
+        ),
+        "web.learned.suggest": "Sugerir regras agora",
+        "web.learned.need_more": "Salve ou descarte pelo menos {n} vagas antes.",
+        "web.learned.saved": "Salvo. As próximas notas usam estas regras.",
+        "web.learned.discarded": "Sugestão descartada.",
+        "web.learned.no_change": "O Claude não encontrou nada novo.",
+        "web.learned.summary": "{n} regras em uso",
+        "web.learned.waiting": "sugestão nova esperando",
+        "learn.proposed": (
+            "💡 O Claude sugeriu {n} regras a partir das vagas que você salvou e descartou. "
+            "Elas só contam depois que você aprova no site: Perfil → Aprendido com seu feedback."
+        ),
         "web.cv.saved": "Salvo.",
         "web.cv.saved_terms": "Salvo. {n} novas buscas adicionadas ao seu perfil.",
         "web.cv.no_file": "Escolha um arquivo PDF.",

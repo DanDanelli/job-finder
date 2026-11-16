@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ t("web.learned.title") }} · Job Finder{% endblock %}
+{% block head %}{% if thinking %}<meta http-equiv="refresh" content="5">{% endif %}{% endblock %}
+{% block main %}
+<p><a href="/profile">← {{ t("web.nav.profile") }}</a></p>
+<h1>{{ t("web.learned.title") }}</h1>
+<p>{{ t("web.learned.intro") }}</p>
+{% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}
+{% if error %}<p class="error" role="alert">{{ t("web.learned.failed", error=error) }}</p>{% endif %}
+<p><small>{{ t("web.learned.counts", saved=st.saved, dismissed=st.dismissed) }}{% if st.checked_at %} · {{ t("web.learned.checked", when=when(st.checked_at)) }}{% endif %}</small></p>
+
+{% if thinking %}
+<p class="notice" role="status"><span class="spinner" aria-hidden="true"></span> {{ t("web.learned.thinking") }}</p>
+{% else %}
+<form method="post" action="/learned" class="card">
+  {% if st.draft is not none %}
+  <h2>{{ t("web.learned.draft") }}</h2>
+  <p><small>{{ t("web.learned.draft_hint") }}</small></p>
+  {% else %}
+  <h2>{{ t("web.learned.current") }}</h2>
+  {% endif %}
+  <textarea name="rules" rows="{{ max_rules + 1 }}" aria-label="{{ t('web.learned.title') }}">{{ text }}</textarea>
+  <small>{{ t("web.learned.hint", n=max_rules) }}</small>
+  <div class="toolbar">
+    <button type="submit">{% if st.draft is not none %}{{ t("web.learned.approve") }}{% else %}{{ t("web.learned.save") }}{% endif %}</button>
+    {% if st.draft is not none %}
+    <button type="submit" formaction="/learned/discard" class="secondary">{{ t("web.learned.discard") }}</button>
+    {% endif %}
+  </div>
+</form>
+{% if st.draft is not none and st.rules %}
+<div class="card">
+  <h2>{{ t("web.learned.current") }}</h2>
+  <ul>{% for r in st.rules %}<li>{{ r }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+{% if st.draft is none %}
+<form method="post" action="/learned/suggest" class="card">
+  <h2>{{ t("web.learned.suggest_title") }}</h2>
+  {% if st.saved + st.dismissed < min_decisions %}
+  <p><small>{{ t("web.learned.need_more", n=min_decisions) }}</small></p>
+  {% elif not can_suggest %}
+  <p><small>{{ t("warn.no_key") }}</small></p>
+  {% else %}
+  <p><small>{{ t("web.learned.suggest_hint") }}</small></p>
+  <button type="submit" class="secondary">{{ t("web.learned.suggest") }}</button>
+  {% endif %}
+</form>
+{% endif %}
+{% endif %}
+{% endblock %}

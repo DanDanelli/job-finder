@@ -17,6 +17,10 @@
 {% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}
 {% if errors %}<p class="error" role="alert">{{ t("web.profile.errors") }}</p>{% endif %}
 
+<p class="card learned-link"><a href="/learned">{{ t("web.learned.title") }}</a>:
+  {{ t("web.learned.summary", n=learning.rules|length) }}{% if learning.draft is not none %} · <strong>{{ t("web.learned.waiting") }}</strong>{% endif %}
+</p>
+
 <form method="post" action="/profile" class="card profile">
   <fieldset>
     <legend>{{ t("web.profile.searches") }}</legend>

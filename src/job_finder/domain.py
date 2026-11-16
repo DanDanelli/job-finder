@@ -140,6 +140,8 @@ class Profile(BaseModel):
     queries: list[Query] = Field(default_factory=list)
     filters: Filters = Field(default_factory=Filters)
     preferences: str = ""
+    # Patterns from the person's feedback, approved on the site (never set from YAML).
+    learned_rules: list[str] = Field(default_factory=list)
 
 
 class FitResult(BaseModel):

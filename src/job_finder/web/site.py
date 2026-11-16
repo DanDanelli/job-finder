@@ -1,5 +1,6 @@
-"""The site: sign-in, jobs, profile, CV, status and account pages (Jinja templates, plain
-forms; pages that wait on background work refresh themselves, with no JavaScript).
+"""The site: sign-in, jobs, profile, CV, learned rules, status and account pages (Jinja
+templates, plain forms; pages that wait on background work refresh themselves, with no
+JavaScript).
 
 Protection:
 - every page except /login needs a session; a profile only ever sees its own data;
@@ -7,6 +8,7 @@ Protection:
 - POSTs from another origin are refused (CSRF), on top of SameSite.
 """
 
+import asyncio
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -26,6 +28,8 @@ from job_finder.db.models import ProfileDB
 from job_finder.db.session import session
 from job_finder.domain import ContractType, WorkMode
 from job_finder.i18n import t
+from job_finder.llm import learner
+from job_finder.llm.client import LLMClient
 from job_finder.llm.profile_extractor import ProfileExtraction
 from job_finder.scheduler import Scheduler, next_run
 from job_finder.telegram.digest import PERIODS, SOURCE_NAMES, WORK_MODES, short_places
@@ -93,7 +97,9 @@ def mount_site(
     scheduler: Scheduler,
     *,
     extract: cv.Extractor | None = None,
+    llm: Callable[[], LLMClient] | None = None,
 ) -> None:
+    """`extract` and `llm` replace the real Claude calls (tests)."""
     lang = settings.language
     templates = Jinja2Templates(directory=HERE / "templates")
     throttle = auth.LoginThrottle()
@@ -261,7 +267,15 @@ def mount_site(
     def profile_page(
         request: Request, profile: ProfileDB, values: dict[str, str], **extra: Any
     ) -> HTMLResponse:
-        return page(request, "profile.html", profile=profile, nav="profile", v=values, **extra)
+        return page(
+            request,
+            "profile.html",
+            profile=profile,
+            nav="profile",
+            v=values,
+            learning=learner.state(engine, profile.id),
+            **extra,
+        )
 
     def values_from(form: data.ProfileForm) -> dict[str, str]:
         f = form.filters
@@ -422,6 +436,86 @@ def mount_site(
             store.discard(profile.id)
             extractions.clear(profile.id)
         return RedirectResponse("/cv", status_code=303)
+
+    # --- learned rules -------------------------------------------------------------------
+
+    learning: dict[int, asyncio.Task[None]] = {}  # profile id -> Claude reading feedback
+    learn_errors: dict[int, str] = {}
+
+    def learning_running(profile_id: int) -> bool:
+        task = learning.get(profile_id)
+        return task is not None and not task.done()
+
+    @router.get("/learned", response_class=HTMLResponse)
+    def learned_view(request: Request, profile: Profile, notice: str = "") -> HTMLResponse:
+        running = learning_running(profile.id)
+        st = learner.state(engine, profile.id)
+        rules = st.draft if st.draft is not None else st.rules
+        messages = {
+            "saved": tr("web.learned.saved"),
+            "discarded": tr("web.learned.discarded"),
+            "nochange": tr("web.learned.no_change"),
+        }
+        return page(
+            request,
+            "learned.html",
+            profile=profile,
+            nav="profile",
+            st=st,
+            text="\n".join(rules),
+            thinking=running,
+            error=None if running else learn_errors.get(profile.id),
+            notice=messages.get(notice),
+            min_decisions=settings.learning_min_decisions,
+            can_suggest=settings.anthropic_api_key is not None or llm is not None,
+            max_rules=learner.MAX_RULES,
+        )
+
+    @router.post("/learned")
+    async def learned_save(request: Request, profile: Profile) -> Response:
+        raw = await request.form()
+        text = str(raw.get("rules") or "")
+        learner.approve(engine, profile.id, text.splitlines())
+        return RedirectResponse("/learned?notice=saved", status_code=303)
+
+    @router.post("/learned/discard")
+    def learned_discard(profile: Profile) -> Response:
+        learner.discard_draft(engine, profile.id)
+        return RedirectResponse("/learned?notice=discarded", status_code=303)
+
+    @router.post("/learned/suggest")
+    async def learned_suggest(profile: Profile) -> Response:
+        st = learner.state(engine, profile.id)
+        enough = st.saved + st.dismissed >= settings.learning_min_decisions
+        if learning_running(profile.id) or not enough:
+            return RedirectResponse("/learned", status_code=303)
+        if llm is None and settings.anthropic_api_key is None:
+            return RedirectResponse("/learned", status_code=303)
+        learn_errors.pop(profile.id, None)
+        profile_id = profile.id
+
+        def run() -> None:
+            from job_finder.llm.client import make_client
+
+            client = llm() if llm is not None else make_client(engine)
+            learner.propose(
+                engine,
+                client,
+                profile_id,
+                model=settings.learning_model,
+                language=lang,
+                now=datetime.now(UTC),
+            )
+
+        async def background() -> None:
+            try:
+                await asyncio.to_thread(run)
+            except Exception as e:
+                log.exception("suggesting rules failed for profile %d", profile_id)
+                learn_errors[profile_id] = f"{type(e).__name__}: {e}"
+
+        learning[profile.id] = asyncio.create_task(background(), name=f"learn {profile.id}")
+        return RedirectResponse("/learned", status_code=303)
 
     # --- search and status -------------------------------------------------------------
 

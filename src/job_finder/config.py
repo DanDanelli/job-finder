@@ -108,6 +108,27 @@ class Settings(BaseSettings):
     web_secure_cookie: bool = True
     web_session_days: int = Field(default=30, ge=1)
 
+    # Learned rules (llm/learner.py): after a scheduled run, when a profile has at least
+    # `learning_min_decisions` saved/dismissed jobs and new ones since Claude last
+    # looked, at most once every `learning_interval_days`. Approved on the site.
+    learning_enabled: bool = True
+    learning_model: str = "claude-opus-5-5"
+    learning_interval_days: int = Field(default=7, ge=1)
+    learning_min_decisions: int = Field(default=5, ge=1)
+    # The site's address, for links in Telegram messages (optional).
+    site_url: str | None = None
+
+    # Daily SQLite backup at `backup_time` (in `timezone`) and on start if today's copy
+    # is missing. Point `backup_dir` at another disk than the database.
+    backup_enabled: bool = True
+    backup_dir: Path | None = None  # default: <data_dir>/backup
+    backup_time: time = time(3, 30)
+    backup_keep_days: int = Field(default=7, ge=1)
+
+    @property
+    def resolved_backup_dir(self) -> Path:
+        return self.backup_dir or self.data_dir / "backup"
+
     @property
     def resolved_database_url(self) -> str:
         """Database URL; by default a SQLite file inside `data_dir`."""

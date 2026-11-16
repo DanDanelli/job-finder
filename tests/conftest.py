@@ -16,6 +16,7 @@ def _isolate_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Ite
         if var.startswith(("JOBFINDER_", "ANTHROPIC_")):
             monkeypatch.delenv(var)
     monkeypatch.setenv("JOBFINDER_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("JOBFINDER_BACKUP_ENABLED", "false")  # tests that need it say so
     monkeypatch.setitem(Settings.model_config, "env_file", None)
     get_settings.cache_clear()
     yield

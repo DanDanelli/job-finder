@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 import typer
 from rich.console import Console
@@ -81,6 +82,26 @@ def db_upgrade(
     url = get_settings().resolved_database_url
     db_session.upgrade(url, revision)
     typer.echo(f"Database upgraded ({revision}): {url}")
+
+
+@db_app.command("backup")
+def db_backup() -> None:
+    """Copies the database now (the app also does it daily) and prunes old copies."""
+    from job_finder.db.backup import BackupError, backup, sqlite_path
+
+    settings = get_settings()
+    database = sqlite_path(settings.resolved_database_url)
+    if database is None:
+        raise typer.BadParameter("backups cover SQLite databases only")
+    today = datetime.now(ZoneInfo(settings.timezone)).date()
+    try:
+        result = backup(database, settings.resolved_backup_dir, today, settings.backup_keep_days)
+    except BackupError as e:
+        console.print(f"[red]Backup failed:[/] {e}")
+        raise typer.Exit(1) from None
+    typer.echo(f"Backup: {result.path} ({result.size // 1024} KB)")
+    for path in result.removed:
+        typer.echo(f"Removed: {path.name}")
 
 
 @profile_app.command("load")

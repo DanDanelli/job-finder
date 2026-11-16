@@ -20,6 +20,11 @@ on a Raspberry Pi.
 4. The Telegram bot sends the digest at the scheduled times, with
    👍 Save / 👎 Dismiss buttons. `/evaluate <link>` scores a single job you found
    elsewhere.
+5. Your decisions teach it. When a job is scored, the saved and dismissed jobs
+   most like it go into the prompt, so Claude calibrates to your taste. Once a
+   week Claude also reads all your decisions and proposes rules ("dismisses
+   outsourcing consultancies"); they count only after you approve or edit them
+   on the site.
 
 Bot messages and Claude's text follow `JOBFINDER_LANGUAGE` (`en` or `pt-BR`).
 
@@ -46,6 +51,14 @@ docker compose up -d --build
 
 The database lives in the `./data` volume. Migrations run on startup.
 
+The app copies the database every day at 03:30 (and on start when today's copy
+is missing), keeping the last 7 days (`JOBFINDER_BACKUP_TIME`,
+`JOBFINDER_BACKUP_KEEP_DAYS`). The copies go to `./data/backup` unless you set
+`BACKUP_HOST_DIR` in `.env` to a folder on another disk, which is what you want:
+a copy on the same disk dies with it. `job-finder db backup` makes one now. To
+restore, stop the container and copy a `job_finder-<date>.db` over
+`data/job_finder.db`.
+
 ## Site
 
 Each profile signs in with its own name and password and sees only its own
@@ -67,6 +80,11 @@ Pages:
 - **Profile**: searches, filters, preferences for Claude, pause. Tightening a
   filter removes the matches it now rejects that nobody has seen yet (not sent
   in a digest, no feedback); loosening one takes effect at the next run.
+- **Learned from your feedback** (linked from Profile): the rules Claude
+  proposed from your saved and dismissed jobs, to approve, edit or discard;
+  **Suggest rules now** asks for a fresh proposal (after at least 5 decisions).
+  On Telegram you get a note when a proposal is waiting (with a link if
+  `JOBFINDER_SITE_URL` is set).
 - **CV**: upload a PDF (up to 10 MB); Claude reads it in the background and
   you review what it extracted (summary, roles, seniority, skills, languages,
   industries, certifications, suggested searches) before anything changes.

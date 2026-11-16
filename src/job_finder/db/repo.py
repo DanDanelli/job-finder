@@ -51,6 +51,7 @@ def profile_from(db: ProfileDB) -> Profile:
         queries=[Query.model_validate(q) for q in db.queries or []],
         filters=Filters.model_validate(db.filters or {}),
         preferences=db.preferences,
+        learned_rules=list(db.learned_rules or []),
     )
 
 

@@ -8,7 +8,11 @@ services:
         required: false
     environment:
       JOBFINDER_DATA_DIR: /data
+      JOBFINDER_BACKUP_DIR: /backup
     ports:
       - "127.0.0.1:8000:8000"  # local only; expose it with a reverse proxy or tailscale serve
     volumes:
       - ./data:/data
+      # Daily database copies. Point BACKUP_HOST_DIR (in .env) at another disk than
+      # ./data, e.g. BACKUP_HOST_DIR=/mnt/usb/backups/job-finder.
+      - ${BACKUP_HOST_DIR:-./data/backup}:/backup

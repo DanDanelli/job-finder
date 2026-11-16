@@ -14,7 +14,7 @@ from typer.testing import CliRunner
 
 from job_finder.cli import app as cli_app
 from job_finder.db import repo
-from job_finder.db.models import LLMCostDB, MatchDB
+from job_finder.db.models import FeedbackDB, LLMCostDB, MatchDB, ProfileDB
 from job_finder.db.session import session
 from job_finder.domain import (
     Filters,
@@ -366,6 +366,47 @@ def test_prompt_prefix_is_stable_and_marked_for_caching(engine: Engine) -> None:
     # Only the job changes, in the user message, delimited as data.
     assert len({ch["messages"][0]["content"] for ch in calls}) == 3
     assert calls[0]["messages"][0]["content"].startswith("<job>")
+
+
+def test_similar_past_decisions_go_after_the_cache_breakpoint(engine: Engine) -> None:
+    profile_id = prepare(engine, JOBS)
+    with session(engine) as s:
+        m = s.scalars(
+            select(MatchDB).join(MatchDB.job).where(MatchDB.job.has(title="Senior Cloud Engineer"))
+        ).one()
+        m.status = MatchStatus.DISMISSED
+        m.score = 82
+        s.add(FeedbackDB(match_id=m.id, action="dismiss", origin="telegram", comment="body shop"))
+    c = client(engine, lambda kw: Response(fit()))
+    score(engine, c, profile_id)
+
+    calls = {
+        ch["messages"][0]["content"].split("Title: ")[1].split("\n")[0]: ch
+        for ch in c.anthropic.messages.calls
+    }
+    assert set(calls) == {"Cloud Architect", "Brand Manager"}  # the dismissed one is not rescored
+    cloud = calls["Cloud Architect"]["messages"][0]["content"]
+    assert cloud.startswith("<past_decisions>")
+    assert "DISMISSED (not interested): Senior Cloud Engineer" in cloud
+    assert "your score then: 82" in cloud and "their note: body shop" in cloud
+    assert cloud.index("</past_decisions>") < cloud.index("<job>")
+    # A job with nothing in common gets no examples.
+    assert calls["Brand Manager"]["messages"][0]["content"].startswith("<job>")
+    # The cached prefix is still the same for every job.
+    systems = [ch["system"] for ch in c.anthropic.messages.calls]
+    assert systems[0] == systems[1]
+
+
+def test_approved_learned_rules_go_into_the_profile_block(engine: Engine) -> None:
+    profile_id = prepare(engine, JOBS[:1])
+    with session(engine) as s:
+        s.get_one(ProfileDB, profile_id).learned_rules = ["Dismisses consultancies"]
+    c = client(engine, lambda kw: Response(fit()))
+    score(engine, c, profile_id)
+    assert (
+        "learned_from_feedback:\n- Dismisses consultancies"
+        in c.anthropic.messages.calls[0]["system"][1]["text"]
+    )
 
 
 def test_failure_leaves_it_pending_and_does_not_stop_the_others(engine: Engine) -> None:
