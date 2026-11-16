@@ -369,10 +369,10 @@ def test_prompt_prefix_is_stable_and_marked_for_caching(engine: Engine) -> None:
 
 
 def test_similar_past_decisions_go_after_the_cache_breakpoint(engine: Engine) -> None:
-    profile_id = prepare(engine, JOBS)
+    profile_id = prepare(engine, [*JOBS, raw("4", "Senior Cloud Architect", "AWS consultancy")])
     with session(engine) as s:
         m = s.scalars(
-            select(MatchDB).join(MatchDB.job).where(MatchDB.job.has(title="Senior Cloud Engineer"))
+            select(MatchDB).join(MatchDB.job).where(MatchDB.job.has(title="Senior Cloud Architect"))
         ).one()
         m.status = MatchStatus.DISMISSED
         m.score = 82
@@ -384,17 +384,47 @@ def test_similar_past_decisions_go_after_the_cache_breakpoint(engine: Engine) ->
         ch["messages"][0]["content"].split("Title: ")[1].split("\n")[0]: ch
         for ch in c.anthropic.messages.calls
     }
-    assert set(calls) == {"Cloud Architect", "Brand Manager"}  # the dismissed one is not rescored
+    assert set(calls) == {
+        "Cloud Architect",
+        "Brand Manager",
+        "Senior Cloud Engineer",
+    }  # the dismissed one is not rescored
     cloud = calls["Cloud Architect"]["messages"][0]["content"]
     assert cloud.startswith("<past_decisions>")
-    assert "DISMISSED (not interested): Senior Cloud Engineer" in cloud
+    assert "DISMISSED (not interested): Senior Cloud Architect" in cloud
     assert "your score then: 82" in cloud and "their note: body shop" in cloud
     assert cloud.index("</past_decisions>") < cloud.index("<job>")
-    # A job with nothing in common gets no examples.
+    # Titles that share only a generic word, or nothing, get no examples.
     assert calls["Brand Manager"]["messages"][0]["content"].startswith("<job>")
+    assert calls["Senior Cloud Engineer"]["messages"][0]["content"].startswith("<job>")
     # The cached prefix is still the same for every job.
     systems = [ch["system"] for ch in c.anthropic.messages.calls]
-    assert systems[0] == systems[1]
+    assert systems[0] == systems[1] == systems[2]
+
+
+def test_few_shot_similarity_is_on_titles_and_normalized() -> None:
+    from job_finder.domain import WorkMode
+    from job_finder.llm.fewshot import Example, similar, title_terms
+
+    def ex(i: int, title: str) -> Example:
+        return Example(i, False, title, None, None, "remote", None, None, title_terms(title))
+
+    pool = [
+        ex(1, "DevOps Engineer"),
+        ex(2, "Senior Data Engineer"),
+        ex(3, "Salesforce Pardot Consultant"),
+        ex(4, "Remote Office Assistant"),
+    ]
+
+    def titles(title: str, **kw: Any) -> list[str]:
+        job = Job(title=title, url="https://x.example", work_mode=WorkMode.REMOTE, **kw)
+        return [e.title for e in similar(pool, job)]
+
+    assert titles("Azure DevOps Engineer") == ["DevOps Engineer"]
+    assert titles("[Job - 32643] Data Engineer") == ["Senior Data Engineer"]
+    # A long description full of the other jobs' words does not make them similar.
+    assert titles("Cloud Architect", description="Salesforce office assistant remote") == []
+    assert similar(pool, Job(title="DevOps Engineer", url="https://x.example"), exclude=1) == []
 
 
 def test_approved_learned_rules_go_into_the_profile_block(engine: Engine) -> None:
