@@ -3,12 +3,13 @@
 {% block main %}
 <nav class="tabs">
   {% for name in tabs %}
-  <a href="/jobs?tab={{ name }}" {% if name == tab %}aria-current="page"{% endif %}>
+  <a href="/jobs?tab={{ name }}&amp;sort={{ sort }}" {% if name == tab %}aria-current="page"{% endif %}>
     {{ t("web.tab." ~ name) }} <span class="count">{{ counts[name] }}</span>
   </a>
   {% endfor %}
 </nav>
 
+<div class="toolbar">
 <form method="get" action="/jobs" class="filters">
   <input type="hidden" name="tab" value="{{ tab }}">
   <label>{{ t("web.jobs.min_score") }}
@@ -22,8 +23,17 @@
       {% for m in WORK_MODES %}<option value="{{ m }}" {% if m == mode %}selected{% endif %}>{{ work_mode(m) }}</option>{% endfor %}
     </select>
   </label>
+  <label>{{ t("web.jobs.sort") }}
+    <select name="sort">
+      {% for o in sorts %}<option value="{{ o }}" {% if o == sort %}selected{% endif %}>{{ t("web.sort." ~ o) }}</option>{% endfor %}
+    </select>
+  </label>
   <button type="submit" class="secondary">{{ t("web.jobs.filter") }}</button>
 </form>
+<form method="post" action="/search" class="search-now">
+  <button type="submit" {% if busy %}disabled{% endif %}>{{ t("web.search.now") }}</button>
+</form>
+</div>
 
 {% if tab == "new" and counts.pending %}<p class="muted">{{ t("web.jobs.pending", n=counts.pending) }}</p>{% endif %}
 

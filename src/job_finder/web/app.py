@@ -12,15 +12,18 @@ from sqlalchemy import Engine, text
 from job_finder import __version__
 from job_finder.config import Settings, get_settings
 from job_finder.db.session import make_engine
+from job_finder.scheduler import Scheduler
+from job_finder.web.cv import Extractor
 
 log = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def _services(settings: Settings, engine: Engine) -> AsyncIterator[None]:
-    """Bot (if there is a token) + scheduler. Without a token, runs happen with no digest."""
-    from job_finder.scheduler import Scheduler
-
+async def _services(
+    settings: Settings, engine: Engine, scheduler: Scheduler
+) -> AsyncIterator[None]:
+    """Bot (if there is a token) + scheduled runs. Without a token, runs happen with no
+    digest. With scheduling disabled, neither starts; the site can still run searches."""
     if not settings.schedule_enabled:
         log.info("scheduling disabled")
         yield
@@ -36,7 +39,7 @@ async def _services(settings: Settings, engine: Engine) -> AsyncIterator[None]:
     else:
         log.warning("no JOBFINDER_TELEGRAM_BOT_TOKEN: runs without a digest")
 
-    scheduler = Scheduler(engine, settings, sender)
+    scheduler.sender = sender
     if bot_app is not None:
         from job_finder.telegram.bot import register_handlers
 
@@ -61,20 +64,22 @@ async def _services(settings: Settings, engine: Engine) -> AsyncIterator[None]:
             await bot_app.shutdown()
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, extract: Extractor | None = None) -> FastAPI:
+    """`extract` replaces the CV reader (Claude) in tests."""
     settings = settings or get_settings()
     engine = make_engine(settings.resolved_database_url)
+    scheduler = Scheduler(engine, settings, None)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        async with _services(settings, engine):
+        async with _services(settings, engine, scheduler):
             yield
 
     app = FastAPI(title="Job Finder", version=__version__, lifespan=lifespan)
 
     from job_finder.web.site import mount_site
 
-    mount_site(app, engine, settings)
+    mount_site(app, engine, settings, scheduler, extract=extract)
 
     @app.get("/health")
     def health() -> dict[str, str]:

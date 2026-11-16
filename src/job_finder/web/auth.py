@@ -94,8 +94,12 @@ def end_session(s: Session, token: str | None) -> None:
         s.execute(delete(SessionDB).where(SessionDB.token_hash == _token_hash(token)))
 
 
-def end_all_sessions(s: Session, profile_id: int) -> None:
-    s.execute(delete(SessionDB).where(SessionDB.profile_id == profile_id))
+def end_all_sessions(s: Session, profile_id: int, keep: str | None = None) -> None:
+    """Signs the profile out everywhere, except the session whose token is `keep`."""
+    query = delete(SessionDB).where(SessionDB.profile_id == profile_id)
+    if keep:
+        query = query.where(SessionDB.token_hash != _token_hash(keep))
+    s.execute(query)
 
 
 class LoginThrottle:

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}{{ t("web.nav.status") }} · Job Finder{% endblock %}
+{% block head %}{% if running %}<meta http-equiv="refresh" content="3">{% endif %}{% endblock %}
+{% block main %}
+<h1>{{ t("web.nav.status") }}</h1>
+
+<section class="card">
+  <h2>{{ t("web.status.search") }}</h2>
+  {% if running %}
+  <p class="notice" role="status"><span class="spinner" aria-hidden="true"></span> {{ progress_text(running.step, running.params) }}</p>
+  <p class="muted">{{ t("web.status.running_since", when=when(running.started_at)) }}
+    {% if running.names %} · {{ running.names | join(", ") }}{% else %} · {{ t("web.status.kind." ~ running.kind) }}{% endif %}</p>
+  {% else %}
+  {% if outcome %}
+    {% if outcome.error %}
+    <p class="error" role="alert">{{ t("web.status.failed", when=when(outcome.finished_at), error=outcome.error) }}</p>
+    {% else %}
+    <p class="notice" role="status">{{ t("web.status.done", when=when(outcome.finished_at), approved=outcome.approved, scored=outcome.scored) }}
+      <a href="/jobs">{{ t("web.status.see_jobs") }}</a></p>
+    {% for w in outcome.warnings %}<p class="muted">⚠ {{ w }}</p>{% endfor %}
+    {% endif %}
+  {% endif %}
+  <form method="post" action="/search"><button type="submit" {% if busy %}disabled{% endif %}>{{ t("web.search.now") }}</button></form>
+  <p class="muted">{{ t("web.status.search_hint") }}</p>
+  {% endif %}
+  <p class="muted">
+    {% if paused %}{{ t("web.status.paused") }} · {% elif upcoming %}{{ t("web.status.next", when=when(upcoming)) }} · {% endif %}{{ t("web.status.waiting", n=counts.pending) }}
+  </p>
+</section>
+
+<section class="card">
+  <h2>{{ t("web.status.claude") }}</h2>
+  <p>{{ t("web.status.spent", spent="%.2f" % spend.total, cap="%.2f" % spend.cap, mine="%.2f" % spend.mine) }}</p>
+  <div class="meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ spend.percent }}"><span style="width: {{ spend.percent }}%"></span></div>
+  {% if spend.operations %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>{{ t("web.status.operation") }}</th><th class="num">{{ t("web.status.calls") }}</th><th class="num">US$</th><th class="num">{{ t("web.status.yours") }}</th></tr></thead>
+    <tbody>
+    {% for o in spend.operations %}<tr><td>{{ t("web.status.op." ~ o.operation) if o.operation in ("scoring", "extract_profile", "extract_job") else o.operation }}</td><td class="num">{{ o.calls }}</td><td class="num">{{ "%.3f" % o.cost }}</td><td class="num">{{ "%.3f" % o.mine }}</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>{{ t("web.status.sources") }}</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>{{ t("web.status.source") }}</th><th class="num">{{ t("web.status.today") }}</th><th class="num">{{ t("web.status.month") }}</th></tr></thead>
+    <tbody>
+    {% for src in sources %}<tr>
+      <td>{{ src.label }}</td>
+      <td class="num">{{ src.today }}{% if src.daily_limit is not none %} / {{ src.daily_limit }}{% endif %}</td>
+      <td class="num">{{ src.month }}{% if src.monthly_limit is not none %} / {{ src.monthly_limit }}{% endif %}</td>
+    </tr>{% endfor %}
+    </tbody>
+  </table></div>
+  <p class="muted">{{ t("web.status.sources_hint") }}</p>
+</section>
+
+<section class="card">
+  <h2>{{ t("web.status.runs") }}</h2>
+  {% if runs %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>{{ t("web.status.when") }}</th><th>{{ t("web.status.result") }}</th><th class="num">{{ t("web.status.collected") }}</th><th class="num">{{ t("web.status.new") }}</th><th class="num">{{ t("web.status.passed") }}</th></tr></thead>
+    <tbody>
+    {% for r in runs %}<tr>
+      <td>{{ when(r.started_at) }}<br><small>{{ t("web.status.kind." ~ r.kind) if r.kind in ("scheduled", "on_demand") else r.kind }}{% if r.seconds is not none %} · {% if r.seconds < 60 %}{{ r.seconds }}s{% else %}{{ r.seconds // 60 }}min{% endif %}{% endif %}</small></td>
+      <td><span class="badge {{ r.status }}">{{ t("web.status.run." ~ r.status) if r.status in ("ok", "partial", "error", "running") else r.status }}</span>
+        {% if r.errors %}<details><summary>{{ t("web.status.errors", n=r.errors | length) }}</summary><ul class="errors">{% for e in r.errors %}<li>{{ e }}</li>{% endfor %}</ul></details>{% endif %}</td>
+      <td class="num">{{ r.collected }}</td><td class="num">{{ r.new }}</td><td class="num">{{ r.matches }}</td>
+    </tr>{% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<p class="muted">{{ t("web.status.no_runs") }}</p>{% endif %}
+</section>
+{% endblock %}

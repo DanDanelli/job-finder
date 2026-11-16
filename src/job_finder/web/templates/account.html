@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}{{ t("web.nav.account") }} · Job Finder{% endblock %}
+{% block main %}
+<h1>{{ t("web.nav.account") }}: {{ profile.name }}</h1>
+{% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+<form method="post" action="/account" class="card narrow">
+  <h2>{{ t("web.account.change") }}</h2>
+  <label>{{ t("web.account.current") }}
+    <input type="password" name="current" autocomplete="current-password" required>
+  </label>
+  <label>{{ t("web.account.new") }}
+    <input type="password" name="new" autocomplete="new-password" minlength="8" required>
+    <small>{{ t("web.account.hint") }}</small>
+  </label>
+  <label>{{ t("web.account.repeat") }}
+    <input type="password" name="repeat" autocomplete="new-password" minlength="8" required>
+  </label>
+  <button type="submit">{{ t("web.account.submit") }}</button>
+</form>
+{% endblock %}

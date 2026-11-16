@@ -1,4 +1,5 @@
-"""The site: sign-in, jobs and profile pages (Jinja templates, plain forms).
+"""The site: sign-in, jobs, profile, CV, status and account pages (Jinja templates, plain
+forms; pages that wait on background work refresh themselves, with no JavaScript).
 
 Protection:
 - every page except /login needs a session; a profile only ever sees its own data;
@@ -13,7 +14,7 @@ from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import urlencode, urlsplit
 
-from fastapi import APIRouter, Depends, FastAPI, Form, Request
+from fastapi import APIRouter, Depends, FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -25,8 +26,10 @@ from job_finder.db.models import ProfileDB
 from job_finder.db.session import session
 from job_finder.domain import ContractType, WorkMode
 from job_finder.i18n import t
-from job_finder.telegram.digest import PERIODS, WORK_MODES, short_places
-from job_finder.web import auth, data, forms
+from job_finder.llm.profile_extractor import ProfileExtraction
+from job_finder.scheduler import Scheduler, next_run
+from job_finder.telegram.digest import PERIODS, SOURCE_NAMES, WORK_MODES, short_places
+from job_finder.web import auth, cv, data, forms, status
 
 log = logging.getLogger(__name__)
 HERE = Path(__file__).parent
@@ -67,11 +70,36 @@ class OriginCheck(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-def mount_site(app: FastAPI, engine: Engine, settings: Settings) -> None:
+def _claude_extractor(engine: Engine, settings: Settings) -> cv.Extractor:
+    def extract(pdf: Path, profile_id: int) -> ProfileExtraction:
+        from job_finder.llm.client import make_client
+        from job_finder.llm.profile_extractor import extract_profile
+
+        return extract_profile(
+            make_client(engine),
+            pdf,
+            model=settings.profile_model,
+            language=settings.language,
+            profile_id=profile_id,
+        )
+
+    return extract
+
+
+def mount_site(
+    app: FastAPI,
+    engine: Engine,
+    settings: Settings,
+    scheduler: Scheduler,
+    *,
+    extract: cv.Extractor | None = None,
+) -> None:
     lang = settings.language
     templates = Jinja2Templates(directory=HERE / "templates")
     throttle = auth.LoginThrottle()
     router = APIRouter()
+    store = cv.CVStore(settings.data_dir)
+    extractions = cv.Extractions(store, extract or _claude_extractor(engine, settings))
 
     def tr(key: str, **params: Any) -> str:
         return t(lang, key, **params)
@@ -86,12 +114,34 @@ def mount_site(app: FastAPI, engine: Engine, settings: Settings) -> None:
     def work_mode(mode: str) -> str | None:
         return tr(f"work_mode.{mode}") if mode in WORK_MODES else None
 
+    def level_label(code: str) -> str:
+        return tr(f"level.{code}")
+
+    level_codes = {level_label(c).lower(): c for c in cv.LEVELS}
+
+    def progress_text(key: str, params: dict[str, Any]) -> str:
+        if "source" in params:
+            params = params | {"source": SOURCE_NAMES.get(params["source"], params["source"])}
+        return tr(key, **params)
+
+    def when(moment: datetime | None) -> str:
+        if moment is None:
+            return ""
+        from zoneinfo import ZoneInfo
+
+        return moment.astimezone(ZoneInfo(settings.timezone)).strftime("%d/%m %H:%M")
+
     templates.env.globals.update(
         t=tr,
         lang=lang,
         salary=salary,
         work_mode=work_mode,
         short_places=short_places,
+        when=when,
+        progress_text=progress_text,
+        level_label=level_label,
+        SENIORITIES=cv.SENIORITIES,
+        LEVELS=cv.LEVELS,
         WORK_MODES=[m.value for m in WorkMode if m != WorkMode.UNKNOWN],
         CONTRACT_TYPES=[c.value for c in ContractType],
         SALARY_CONTRACTS=[c.value for c in forms.SALARY_CONTRACTS],
@@ -112,6 +162,8 @@ def mount_site(app: FastAPI, engine: Engine, settings: Settings) -> None:
     Profile = Annotated[ProfileDB, Depends(current_profile)]
 
     def page(request: Request, name: str, **context: Any) -> HTMLResponse:
+        context.setdefault("running", scheduler.current)
+        context.setdefault("busy", scheduler.busy)
         return templates.TemplateResponse(request, name, context)
 
     @router.get("/login", response_class=HTMLResponse)
@@ -169,9 +221,13 @@ def mount_site(app: FastAPI, engine: Engine, settings: Settings) -> None:
         tab: str = "new",
         min_score: int = 0,
         mode: str = "",
+        sort: str = "score_desc",
     ) -> HTMLResponse:
         tab = tab if tab in data.TABS else "new"
-        cards = data.job_cards(engine, profile.id, tab, min_score=min_score, work_mode=mode or None)
+        sort = sort if sort in data.SORTS else "score_desc"
+        cards = data.job_cards(
+            engine, profile.id, tab, min_score=min_score, work_mode=mode or None, sort=sort
+        )
         return page(
             request,
             "jobs.html",
@@ -183,8 +239,10 @@ def mount_site(app: FastAPI, engine: Engine, settings: Settings) -> None:
             cards=cards,
             min_score=min_score,
             mode=mode,
+            sort=sort,
+            sorts=data.SORTS,
             score_steps=SCORE_STEPS,
-            query=urlencode({"tab": tab, "min_score": min_score, "mode": mode}),
+            query=urlencode({"tab": tab, "min_score": min_score, "mode": mode, "sort": sort}),
         )
 
     @router.post("/matches/{match_id}")
@@ -266,6 +324,183 @@ def mount_site(app: FastAPI, engine: Engine, settings: Settings) -> None:
             now=now(),
         )
         return RedirectResponse(f"/profile?dropped={dropped}", status_code=303)
+
+    # --- CV --------------------------------------------------------------------------
+
+    def cv_page(
+        request: Request,
+        profile: ProfileDB,
+        values: dict[str, str] | None = None,
+        errors: dict[str, str] | None = None,
+        notice: str | None = None,
+        status_code: int = 200,
+    ) -> HTMLResponse:
+        job = extractions.get(profile.id)
+        # Decided once: the draft is written before the task ends, so "not running"
+        # here means the draft (if any) is already on disk.
+        extracting = job is not None and job.running
+        draft = None if extracting else store.draft(profile.id)
+        current, queries = data.profile_data(engine, profile.id)
+        if values is None:
+            values = cv.data_values(draft.data if draft else current, level_label)
+        response = page(
+            request,
+            "cv.html",
+            profile=profile,
+            nav="cv",
+            v=values,
+            errors=errors or {},
+            notice=notice,
+            extracting=extracting,
+            extract_error=job.error if job else None,
+            draft=draft,
+            terms=data.new_terms(draft.search_terms, queries) if draft else [],
+            has_resume=bool(profile.resume_path),
+            max_mb=cv.MAX_PDF_BYTES // (1024 * 1024),
+        )
+        response.status_code = status_code
+        return response
+
+    @router.get("/cv", response_class=HTMLResponse)
+    def cv_view(request: Request, profile: Profile, saved: int | None = None) -> HTMLResponse:
+        notice = None
+        if saved is not None:
+            notice = tr("web.cv.saved_terms", n=saved) if saved else tr("web.cv.saved")
+        return cv_page(request, profile, notice=notice)
+
+    @router.post("/cv/upload", response_class=HTMLResponse)
+    async def cv_upload(
+        request: Request,
+        profile: Profile,
+        file: Annotated[UploadFile | None, File()] = None,
+    ) -> Response:
+        job = extractions.get(profile.id)
+        if job is not None and job.running:
+            return RedirectResponse("/cv", status_code=303)
+        content = await file.read(cv.MAX_PDF_BYTES + 1) if file is not None else b""
+        error = None
+        if not content:
+            error = tr("web.cv.no_file")
+        elif len(content) > cv.MAX_PDF_BYTES:
+            error = tr("web.cv.too_big", mb=cv.MAX_PDF_BYTES // (1024 * 1024))
+        elif not cv.is_pdf(content):
+            error = tr("web.cv.not_pdf")
+        elif settings.anthropic_api_key is None and extract is None:
+            error = tr("warn.no_key")
+        if error:
+            return cv_page(request, profile, errors={"file": error}, status_code=422)
+        extractions.clear(profile.id)
+        store.save_upload(profile.id, content)
+        extractions.start(profile.id)
+        return RedirectResponse("/cv", status_code=303)
+
+    @router.post("/cv", response_class=HTMLResponse)
+    async def cv_save(request: Request, profile: Profile) -> Response:
+        raw = await request.form()
+        single = {k: str(v) for k, v in raw.items() if isinstance(v, str)}
+        parsed = cv.parse_data(single, level_codes)
+        if parsed.errors:
+            return cv_page(request, profile, single, parsed.errors, status_code=422)
+        job = extractions.get(profile.id)
+        draft = None if job and job.running else store.draft(profile.id)
+        resume_path = None
+        terms: list[str] = []
+        if draft is not None and single.get("from_draft"):
+            suggested = set(draft.search_terms)  # only terms Claude suggested
+            terms = [str(x) for x in raw.getlist("terms") if str(x) in suggested]
+            resume_path = str(store.promote(profile.id))
+        added = data.save_profile_data(
+            engine, profile.id, parsed.data, add_terms=terms, resume_path=resume_path
+        )
+        extractions.clear(profile.id)
+        return RedirectResponse(f"/cv?saved={added}", status_code=303)
+
+    @router.post("/cv/discard")
+    def cv_discard(profile: Profile) -> Response:
+        job = extractions.get(profile.id)
+        if job is None or not job.running:
+            store.discard(profile.id)
+            extractions.clear(profile.id)
+        return RedirectResponse("/cv", status_code=303)
+
+    # --- search and status -------------------------------------------------------------
+
+    @router.post("/search")
+    async def search_now(profile: Profile) -> Response:
+        scheduler.start([profile.name], kind="on_demand")
+        return RedirectResponse("/status", status_code=303)
+
+    @router.get("/status", response_class=HTMLResponse)
+    def status_view(request: Request, profile: Profile) -> HTMLResponse:
+        # `current` before `last`: the scheduler records the outcome before clearing
+        # `current`, so reading in this order always sees one of them.
+        running = scheduler.current
+        outcome = scheduler.last.get(profile.name)
+        moment = now()
+        upcoming = None
+        if settings.schedule_enabled and settings.run_times:
+            from zoneinfo import ZoneInfo
+
+            upcoming = next_run(moment, settings.run_times, ZoneInfo(settings.timezone))
+        return page(
+            request,
+            "status.html",
+            profile=profile,
+            nav="status",
+            running=running,
+            busy=running is not None or scheduler.busy,
+            outcome=outcome,
+            upcoming=upcoming,
+            sources=status.sources(engine, settings, moment.date()),
+            runs=status.recent_runs(engine),
+            spend=status.spend(engine, settings, profile.id, moment),
+            counts=data.counts(engine, profile.id),
+            paused=data.load_profile(engine, profile.id).paused,
+        )
+
+    # --- account -----------------------------------------------------------------------
+
+    @router.get("/account", response_class=HTMLResponse)
+    def account_view(request: Request, profile: Profile, changed: int = 0) -> HTMLResponse:
+        notice = tr("web.account.changed") if changed else None
+        return page(
+            request, "account.html", profile=profile, nav="account", notice=notice, error=None
+        )
+
+    @router.post("/account", response_class=HTMLResponse)
+    def account_save(
+        request: Request,
+        profile: Profile,
+        current: Annotated[str, Form()] = "",
+        new: Annotated[str, Form()] = "",
+        repeat: Annotated[str, Form()] = "",
+    ) -> Response:
+        def fail(message: str, code: int) -> HTMLResponse:
+            response = page(
+                request,
+                "account.html",
+                profile=profile,
+                nav="account",
+                notice=None,
+                error=message,
+            )
+            response.status_code = code
+            return response
+
+        key = profile.name.lower()
+        if throttle.blocked(key):
+            return fail(tr("web.login.blocked"), 429)
+        if not auth.verify_password(current, profile.password_hash):
+            throttle.failed(key)
+            return fail(tr("web.account.wrong_current"), 403)
+        if new != repeat:
+            return fail(tr("web.account.mismatch"), 422)
+        if len(new) < auth.MIN_PASSWORD_LENGTH:
+            return fail(tr("web.account.too_short", n=auth.MIN_PASSWORD_LENGTH), 422)
+        with session(engine) as s:
+            s.get_one(ProfileDB, profile.id).password_hash = auth.hash_password(new)
+            auth.end_all_sessions(s, profile.id, keep=request.cookies.get(COOKIE))
+        return RedirectResponse("/account?changed=1", status_code=303)
 
     async def login_required(request: Request, exc: Exception) -> Response:
         return RedirectResponse("/login", status_code=303)

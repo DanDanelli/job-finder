@@ -8,6 +8,7 @@
   <meta name="referrer" content="same-origin">
   <title>{% block title %}Job Finder{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css">
+  {% block head %}{% endblock %}
 </head>
 <body>
   {% if profile is defined %}
@@ -16,12 +17,17 @@
     <nav>
       <a href="/jobs" {% if nav == "jobs" %}aria-current="page"{% endif %}>{{ t("web.nav.jobs") }}</a>
       <a href="/profile" {% if nav == "profile" %}aria-current="page"{% endif %}>{{ t("web.nav.profile") }}</a>
+      <a href="/cv" {% if nav == "cv" %}aria-current="page"{% endif %}>{{ t("web.nav.cv") }}</a>
+      <a href="/status" {% if nav == "status" %}aria-current="page"{% endif %}>{{ t("web.nav.status") }}</a>
     </nav>
     <form method="post" action="/logout" class="who">
-      <span>{{ profile.name }}</span>
+      <a href="/account" {% if nav == "account" %}aria-current="page"{% endif %} title="{{ t('web.nav.account') }}">{{ profile.name }}</a>
       <button type="submit" class="link">{{ t("web.logout") }}</button>
     </form>
   </header>
+  {% if running and nav != "status" %}
+  <a class="running" href="/status" role="status">{{ t("web.search.running") }}: {{ progress_text(running.step, running.params) }}</a>
+  {% endif %}
   {% endif %}
   <main>{% block main %}{% endblock %}</main>
 </body>

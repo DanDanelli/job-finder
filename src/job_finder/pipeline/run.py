@@ -6,9 +6,10 @@ applied per profile.
 
 import logging
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import Any
 
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
@@ -23,6 +24,13 @@ from job_finder.pipeline.normalize import normalize
 from job_finder.quota import Quota, QuotaExhausted
 
 log = logging.getLogger(__name__)
+
+# Called with an i18n key ("progress.*") and its parameters as a run moves along.
+Progress = Callable[[str, dict[str, Any]], None]
+
+
+def no_progress(key: str, params: dict[str, Any]) -> None:
+    pass
 
 
 @dataclass
@@ -54,11 +62,16 @@ def _queries(profiles: Sequence[ProfileDB]) -> list[Query]:
 
 
 def collect(
-    engine: Engine, connectors: Sequence[Connector], queries: list[Query], now: datetime
+    engine: Engine,
+    connectors: Sequence[Connector],
+    queries: list[Query],
+    now: datetime,
+    progress: Progress = no_progress,
 ) -> tuple[list[RawJob], list[str]]:
     raws: list[RawJob] = []
     errors: list[str] = []
-    for connector in connectors:
+    for i, connector in enumerate(connectors, 1):
+        progress("progress.collect", {"source": connector.name, "i": i, "n": len(connectors)})
         quota = Quota(
             engine,
             connector.name,
@@ -87,17 +100,19 @@ def execute_run(
     profiles: Sequence[ProfileDB],
     now: datetime,
     kind: str = "on_demand",
+    progress: Progress = no_progress,
 ) -> RunSummary:
     # Collection (network + quota, which writes in its own transaction) comes before any
     # write in this session: SQLite takes one writer at a time, and slow HTTP calls must
     # not hold the database lock.
-    raws, errors = collect(engine, connectors, _queries(profiles), now)
+    raws, errors = collect(engine, connectors, _queries(profiles), now, progress)
 
     run = RunDB(kind=kind, status="running", started_at=now)
     s.add(run)
     s.flush()
     summary = RunSummary(run_id=run.id, errors=list(errors))
 
+    progress("progress.store", {"n": len(raws)})
     for raw in raws:
         try:
             job = normalize(raw)
@@ -111,6 +126,7 @@ def execute_run(
         summary.new += int(is_new)
 
     for profile_db in profiles:
+        progress("progress.filter", {"profile": profile_db.name})
         summary.profiles.append(_filter_for_profile(s, profile_db, now))
 
     run.finished_at = datetime.now(now.tzinfo)

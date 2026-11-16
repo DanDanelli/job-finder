@@ -27,6 +27,7 @@ from job_finder.pipeline.prerank import (
     relevance,
     tokens,
 )
+from job_finder.pipeline.run import Progress
 
 log = logging.getLogger(__name__)
 
@@ -240,6 +241,7 @@ def score_pending(
     now: datetime,
     run_id: int | None = None,
     cutoff: RelevanceCutoff | None = None,
+    progress: Progress | None = None,
 ) -> ScoringSummary:
     """Scores the profile's best pending jobs with the LLM.
 
@@ -251,7 +253,9 @@ def score_pending(
     profile, chosen, pending, skipped = _select(engine, profile_id, now, top_n, cutoff)
     summary = ScoringSummary(profile=profile.name, pending=pending, skipped=skipped)
 
-    for match_id, job in chosen:
+    for i, (match_id, job) in enumerate(chosen, 1):
+        if progress is not None:
+            progress("progress.score", {"profile": profile.name, "i": i, "n": len(chosen)})
         try:
             fit = evaluate(
                 client,

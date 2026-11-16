@@ -1,13 +1,17 @@
 """Scheduler: runs at the configured times, with the digest at the end of each one.
 
-One run at a time (lock shared with the bot's /search). The pipeline is synchronous
-(SQLAlchemy, httpx, Claude SDK) and runs in a thread so it does not block the bot.
+One run at a time (lock shared with the bot's /search and the site's "Search now"). The
+pipeline is synchronous (SQLAlchemy, httpx, Claude SDK) and runs in a thread so it does
+not block the bot or the site. While it runs, `current` says what it is doing; when it
+ends, `last` keeps each profile's outcome (in memory: a restart forgets it).
 """
 
 import asyncio
 import logging
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import Engine
@@ -32,6 +36,29 @@ def next_run(now: datetime, times: Sequence[time], tz: ZoneInfo) -> datetime:
     return min(c for c in candidates if c > local).astimezone(UTC)
 
 
+@dataclass
+class RunState:
+    """What the run in progress is doing: an i18n key ("progress.*") and its params."""
+
+    kind: str
+    names: tuple[str, ...] | None
+    started_at: datetime
+    step: str = "progress.start"
+    params: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class RunOutcome:
+    """How the last run went for one profile."""
+
+    finished_at: datetime
+    kind: str
+    approved: int = 0  # passed the filters
+    scored: int = 0  # scored by Claude in this run
+    warnings: tuple[str, ...] = ()
+    error: str | None = None
+
+
 class Scheduler:
     def __init__(
         self,
@@ -46,22 +73,71 @@ class Scheduler:
         self.sender = sender
         self.pause = pause_between_messages_s
         self.lock = asyncio.Lock()
+        self.current: RunState | None = None
+        self.last: dict[str, RunOutcome] = {}  # by profile name
+        self._task: asyncio.Task[Report | None] | None = None
 
     @property
     def busy(self) -> bool:
-        return self.lock.locked()
+        return self.lock.locked() or (self._task is not None and not self._task.done())
+
+    def start(self, names: Sequence[str] | None, kind: str = "on_demand") -> bool:
+        """Starts a run in the background (the site's "Search now"). False if one is
+        already running. Must be called from the event loop."""
+        if self.busy:
+            return False
+        self._task = asyncio.create_task(self._run_logged(names, kind), name=f"{kind} run")
+        return True
+
+    async def _run_logged(self, names: Sequence[str] | None, kind: str) -> Report | None:
+        try:
+            return await self.run_and_notify(names, kind=kind)
+        except Exception as e:
+            log.exception("%s run failed", kind)
+            for name in names or ():
+                self.last[name] = RunOutcome(
+                    datetime.now(UTC), kind, error=f"{type(e).__name__}: {e}"
+                )
+            return None
+
+    def _progress(self, key: str, params: dict[str, Any]) -> None:
+        # Called from the run's thread; replacing two attributes is enough here.
+        if self.current is not None:
+            self.current.step, self.current.params = key, dict(params)
 
     async def run_and_notify(
         self, names: Sequence[str] | None = None, kind: str = "scheduled"
     ) -> Report | None:
         async with self.lock:
+            self.current = RunState(kind, tuple(names) if names else None, datetime.now(UTC))
             try:
                 report = await asyncio.to_thread(
-                    full_run, self.engine, self.settings, names=names, kind=kind
+                    full_run,
+                    self.engine,
+                    self.settings,
+                    names=names,
+                    kind=kind,
+                    progress=self._progress,
                 )
             except NoProfiles:
                 log.info("%s run with no active profiles", kind)
+                self.current = None
                 return None
+            except BaseException:
+                self.current = None
+                raise
+            # The outcome is in place before `current` clears, so a page never sees a
+            # finished run with neither.
+            finished = datetime.now(UTC)
+            for pr in report.profiles:
+                self.last[pr.name] = RunOutcome(
+                    finished,
+                    kind,
+                    approved=len(pr.filters.approved),
+                    scored=pr.scoring.scored if pr.scoring else 0,
+                    warnings=tuple(report.warnings_for(pr.profile_id)),
+                )
+            self.current = None
             if self.sender is not None:
                 for pr in report.profiles:
                     try:

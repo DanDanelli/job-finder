@@ -3,16 +3,18 @@
 Every function takes the signed-in profile's id and touches only that profile's data.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import Engine, exists, func, select
+from sqlalchemy import ColumnElement, Engine, exists, func, select
 from sqlalchemy.orm import selectinload
 
 from job_finder.db import repo
 from job_finder.db.models import FeedbackDB, JobDB, MatchDB, ProfileDB
 from job_finder.db.session import session
-from job_finder.domain import Filters, MatchStatus, Query
+from job_finder.domain import Filters, MatchStatus, ProfileData, Query
 from job_finder.pipeline.filters import discard_reason
 from job_finder.telegram.digest import DigestItem, digest_item
 
@@ -27,6 +29,9 @@ ACTIONS: dict[str, tuple[MatchStatus, str]] = {
     "dismiss": (MatchStatus.DISMISSED, "dismiss"),
     "restore": (MatchStatus.NEW, "restore"),
 }
+# Sort orders of the jobs list: by fit or by posting date (collection date when the
+# source gave none), each both ways. Ties go to the newest match.
+SORTS = ("score_desc", "score_asc", "date_desc", "date_asc")
 # Matches the site may drop when a filter is tightened: never shown to the person.
 _UNSEEN = (MatchStatus.PENDING, MatchStatus.NEW, MatchStatus.SKIPPED)
 
@@ -59,9 +64,18 @@ def job_cards(
     *,
     min_score: int = 0,
     work_mode: str | None = None,
+    sort: str = "score_desc",
     limit: int = 100,
 ) -> list[JobCard]:
     status = TABS.get(tab, MatchStatus.NEW)
+    posted = func.coalesce(JobDB.posted_at, JobDB.created_at)
+    orders: dict[str, tuple[ColumnElement[Any], ...]] = {
+        "score_desc": (MatchDB.score.desc(), posted.desc()),
+        "score_asc": (MatchDB.score.asc(), posted.desc()),
+        "date_desc": (posted.desc(), MatchDB.score.desc()),
+        "date_asc": (posted.asc(), MatchDB.score.desc()),
+    }
+    order = orders.get(sort, orders["score_desc"])
     q = (
         select(MatchDB)
         .join(MatchDB.job)
@@ -72,7 +86,7 @@ def job_cards(
             MatchDB.score >= min_score,
         )
         .options(selectinload(MatchDB.job).selectinload(JobDB.sources))
-        .order_by(MatchDB.score.desc(), MatchDB.id.desc())
+        .order_by(*order, MatchDB.id.desc())
         .limit(limit)
     )
     if work_mode:
@@ -153,3 +167,46 @@ def save_profile(
                 s.delete(match)
                 dropped += 1
         return dropped
+
+
+def profile_data(engine: Engine, profile_id: int) -> tuple[ProfileData, list[Query]]:
+    with session(engine, commit=False) as s:
+        p = repo.profile_from(s.get_one(ProfileDB, profile_id))
+        return p.data, p.queries
+
+
+def new_terms(terms: list[str], queries: list[Query]) -> list[str]:
+    """Suggested search terms the profile does not have yet (case-insensitive)."""
+    known = {q.term.casefold() for q in queries}
+    result: dict[str, str] = {}
+    for term in terms:
+        term = term.strip()
+        if term and term.casefold() not in known:
+            result.setdefault(term.casefold(), term)
+    return list(result.values())
+
+
+def save_profile_data(
+    engine: Engine,
+    profile_id: int,
+    data: ProfileData,
+    *,
+    add_terms: Sequence[str] = (),
+    resume_path: str | None = None,
+) -> int:
+    """Saves the reviewed professional data; adds the chosen search terms as active
+    searches and, after an upload, records the new CV. Returns how many terms were added.
+    """
+    with session(engine) as s:
+        db = s.get_one(ProfileDB, profile_id)
+        profile = repo.profile_from(db)
+        db.data = data.model_dump(mode="json")
+        terms = new_terms(list(add_terms), profile.queries)
+        if terms:
+            db.queries = [
+                q.model_dump(mode="json")
+                for q in [*profile.queries, *(Query(term=t) for t in terms)]
+            ]
+        if resume_path is not None:
+            db.resume_path = resume_path
+        return len(terms)

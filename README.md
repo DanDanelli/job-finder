@@ -49,25 +49,46 @@ The database lives in the `./data` volume. Migrations run on startup.
 ## Site
 
 Each profile signs in with its own name and password and sees only its own
-jobs and profile: the New / Saved / Dismissed tabs, and the searches, filters
-and preferences. There is no sign-up; set or change a password from the
-terminal (it is asked twice and never echoed, and it signs out open sessions):
+data. There is no sign-up: the first password is set from the terminal; after
+that, each person can change their own under **Account** (the other devices
+are signed out).
 
 ```bash
 docker compose exec job-finder job-finder profile password <name>
+# or, without an interactive terminal (e.g. piped over ssh):
+printf '%s\n' "$PASSWORD" | docker compose exec -T job-finder job-finder profile password <name> --stdin
 ```
 
-The container listens only on `127.0.0.1:8000`. Reach it over Tailscale, which
-also gives HTTPS (the session cookie is `Secure` by default):
+Pages:
+
+- **Jobs**: New / Saved / Dismissed tabs, minimum fit and work mode filters,
+  sorted by fit or by posting date (either way); save, dismiss, restore.
+  **Search now** runs a search for your profile in the background.
+- **Profile**: searches, filters, preferences for Claude, pause. Tightening a
+  filter removes the matches it now rejects that nobody has seen yet (not sent
+  in a digest, no feedback); loosening one takes effect at the next run.
+- **CV**: upload a PDF (up to 10 MB); Claude reads it in the background and
+  you review what it extracted (summary, roles, seniority, skills, languages,
+  industries, certifications, suggested searches) before anything changes.
+  The same form edits that data at any time.
+- **Status**: what a running search is doing (the page refreshes itself), how
+  the last one went, each source's requests today and this month against its
+  limits, recent runs with their warnings, and Claude's spend this month
+  (total, per use, and yours).
+
+The pages are plain HTML forms; no JavaScript. The container listens only on
+`127.0.0.1:8000`. Reach it over Tailscale, which also gives HTTPS (the session
+cookie is `Secure` by default):
 
 ```bash
 sudo tailscale serve --bg --https=8443 http://127.0.0.1:8000
 # https://<machine>.<tailnet>.ts.net:8443
 ```
 
-For plain HTTP on a trusted network, set `JOBFINDER_WEB_SECURE_COOKIE=false`.
-Tightening a filter removes the matches it now rejects that nobody has seen yet
-(not sent in a digest, no feedback); loosening one takes effect at the next run.
+Someone outside your tailnet can get in if you share just that machine with
+them from the Tailscale admin console (Machines → ⋯ → Share); they use the
+full `<machine>.<tailnet>.ts.net` name. For plain HTTP on a trusted network,
+set `JOBFINDER_WEB_SECURE_COOKIE=false`.
 
 ## Sources and their terms
 

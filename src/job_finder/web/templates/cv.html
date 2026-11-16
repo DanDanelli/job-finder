@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}{{ t("web.nav.cv") }} · Job Finder{% endblock %}
+{% block head %}{% if extracting %}<meta http-equiv="refresh" content="4">{% endif %}{% endblock %}
+{% macro error(name) %}{% if errors.get(name) %}<span class="error">{{ t("web.profile.not_recognized", value=errors[name]) }}</span>{% endif %}{% endmacro %}
+{% block main %}
+<h1>{{ t("web.nav.cv") }}: {{ profile.name }}</h1>
+{% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}
+
+<section class="card">
+  <h2>{{ t("web.cv.upload") }}</h2>
+  {% if extracting %}
+  <p class="notice" role="status"><span class="spinner" aria-hidden="true"></span> {{ t("web.cv.extracting") }}</p>
+  {% else %}
+  {% if extract_error %}<p class="error" role="alert">{{ t("web.cv.failed", error=extract_error) }}</p>{% endif %}
+  {% if errors.get("file") %}<p class="error" role="alert">{{ errors["file"] }}</p>{% endif %}
+  <p class="muted">{% if has_resume %}{{ t("web.cv.has_resume") }}{% else %}{{ t("web.cv.no_resume") }}{% endif %} {{ t("web.cv.upload_hint", mb=max_mb) }}</p>
+  <form method="post" action="/cv/upload" enctype="multipart/form-data" class="upload">
+    <input type="file" name="file" accept="application/pdf,.pdf" required>
+    <button type="submit">{{ t("web.cv.send") }}</button>
+  </form>
+  {% endif %}
+</section>
+
+{% if not extracting %}
+{% if draft %}<p class="notice" role="status">{{ t("web.cv.review") }}</p>{% endif %}
+{% if errors and not errors.get("file") %}<p class="error" role="alert">{{ t("web.profile.errors") }}</p>{% endif %}
+<form method="post" action="/cv" class="card profile">
+  {% if draft %}<input type="hidden" name="from_draft" value="1">{% endif %}
+  <fieldset>
+    <legend>{{ t("web.cv.data") }}</legend>
+    <small>{{ t("web.cv.data_hint") }}</small>
+    <label>{{ t("web.cv.summary") }}
+      <textarea name="summary" rows="4">{{ v.get("summary", "") }}</textarea>
+    </label>
+    <label>{{ t("web.cv.roles") }}
+      <textarea name="roles" rows="3">{{ v.get("roles", "") }}</textarea>
+      <small>{{ t("web.profile.block.hint") }}</small>
+    </label>
+    <div class="pair">
+      <label>{{ t("web.cv.seniority") }}
+        <select name="seniority" class="{% if errors.get('seniority') %}invalid{% endif %}">
+          <option value="">—</option>
+          {% for x in SENIORITIES %}<option value="{{ x }}" {% if v.get("seniority") == x %}selected{% endif %}>{{ t("seniority." ~ x) }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>{{ t("web.cv.years") }}
+        <input name="years_experience" type="number" min="0" max="80" value="{{ v.get('years_experience', '') }}" class="short {% if errors.get('years_experience') %}invalid{% endif %}">
+        {{ error("years_experience") }}
+      </label>
+    </div>
+    <label>{{ t("web.cv.skills") }}
+      <textarea name="skills" rows="8" class="{% if errors.get('skills') %}invalid{% endif %}">{{ v.get("skills", "") }}</textarea>
+      <small>{{ t("web.cv.skills_hint") }}</small>{{ error("skills") }}
+    </label>
+    <label>{{ t("web.cv.languages") }}
+      <textarea name="languages" rows="3" class="{% if errors.get('languages') %}invalid{% endif %}">{{ v.get("languages", "") }}</textarea>
+      <small>{{ t("web.cv.languages_hint") }} {% for l in LEVELS %}{{ level_label(l) }}{% if not loop.last %}, {% endif %}{% endfor %}</small>{{ error("languages") }}
+    </label>
+    <label>{{ t("web.cv.industries") }}
+      <textarea name="industries" rows="3">{{ v.get("industries", "") }}</textarea>
+    </label>
+    <label>{{ t("web.cv.certifications") }}
+      <textarea name="certifications" rows="3">{{ v.get("certifications", "") }}</textarea>
+    </label>
+  </fieldset>
+
+  {% if draft and terms %}
+  <fieldset>
+    <legend>{{ t("web.cv.terms") }}</legend>
+    <small>{{ t("web.cv.terms_hint") }}</small>
+    {% for term in terms %}<label class="check"><input type="checkbox" name="terms" value="{{ term }}" checked> {{ term }}</label>{% endfor %}
+  </fieldset>
+  {% endif %}
+
+  <div class="actions">
+    <button type="submit">{% if draft %}{{ t("web.cv.save_draft") }}{% else %}{{ t("web.profile.save") }}{% endif %}</button>
+    {% if draft %}<button type="submit" formaction="/cv/discard" formnovalidate class="secondary">{{ t("web.cv.discard") }}</button>{% endif %}
+  </div>
+</form>
+{% endif %}
+{% endblock %}

@@ -511,3 +511,376 @@ def test_cli_short_password_from_stdin_is_refused(engine: Engine, db_url: str) -
         env={"JOBFINDER_DATABASE_URL": db_url},
     )
     assert result.exit_code != 0 and _password_hash(engine, "daniel") is None
+
+
+# --- sorting ----------------------------------------------------------------------
+
+
+def _set_scores(engine: Engine, scores: dict[str, int]) -> None:
+    with session(engine) as s:
+        for m in s.scalars(select(MatchDB)):
+            m.score = scores[m.job.title]
+
+
+def test_jobs_can_be_sorted_by_fit_and_date(engine: Engine, client: TestClient) -> None:
+    add_profile(engine, "daniel")
+    add_matches(
+        engine,
+        "daniel",
+        [
+            raw("1", "Old good", posted_at=NOW - timedelta(days=5)),
+            raw("2", "New weak", posted_at=NOW - timedelta(hours=2)),
+            raw("3", "Middle", posted_at=NOW - timedelta(days=2)),
+        ],
+    )
+    _set_scores(engine, {"Old good": 90, "New weak": 55, "Middle": 70})
+    login(client)
+
+    def order(sort: str | None) -> list[str]:
+        page = client.get("/jobs" + (f"?sort={sort}" if sort else "")).text
+        titles = ["Old good", "New weak", "Middle"]
+        return sorted(titles, key=page.index)
+
+    assert order(None) == ["Old good", "Middle", "New weak"]
+    assert order("score_desc") == ["Old good", "Middle", "New weak"]
+    assert order("score_asc") == ["New weak", "Middle", "Old good"]
+    assert order("date_desc") == ["New weak", "Middle", "Old good"]
+    assert order("date_asc") == ["Old good", "Middle", "New weak"]
+    assert order("nonsense") == ["Old good", "Middle", "New weak"]
+    # the order survives an action
+    assert 'name="back" value="tab=new&amp;min_score=0&amp;mode=&amp;sort=date_asc"' in (
+        client.get("/jobs?sort=date_asc").text
+    )
+
+
+# --- account --------------------------------------------------------------------
+
+
+def test_change_password_signs_out_other_devices(engine: Engine, db_url: str) -> None:
+    add_profile(engine, "daniel")
+    settings = Settings(database_url=db_url, schedule_enabled=False, web_secure_cookie=False)
+    app = create_app(settings)
+    with TestClient(app, follow_redirects=False) as phone, TestClient(app) as laptop:
+        login(phone)
+        login(laptop)
+        new = "new password 123"
+        r = phone.post("/account", data={"current": PASSWORD, "new": new, "repeat": new})
+        assert r.status_code == 303 and r.headers["location"] == "/account?changed=1"
+        assert phone.get("/jobs").status_code == 200  # this device stays in
+        assert laptop.get("/jobs", follow_redirects=False).status_code == 303  # signed out
+        assert auth.verify_password(new, _password_hash(engine, "daniel"))
+
+
+@pytest.mark.parametrize(
+    ("form", "status", "message"),
+    [
+        ({"current": "wrong password", "new": "abcdefgh1", "repeat": "abcdefgh1"}, 403, "wrong"),
+        ({"current": PASSWORD, "new": "abcdefgh1", "repeat": "abcdefgh2"}, 422, "differ"),
+        ({"current": PASSWORD, "new": "short", "repeat": "short"}, 422, "at least 8"),
+    ],
+)
+def test_change_password_errors(
+    engine: Engine, client: TestClient, form: dict[str, str], status: int, message: str
+) -> None:
+    add_profile(engine, "daniel")
+    login(client)
+    r = client.post("/account", data=form)
+    assert r.status_code == status and message in r.text
+    assert auth.verify_password(PASSWORD, _password_hash(engine, "daniel"))
+
+
+def test_guessing_the_current_password_is_throttled(engine: Engine, client: TestClient) -> None:
+    add_profile(engine, "daniel")
+    login(client)
+    for _ in range(auth.LoginThrottle.MAX_FAILURES):
+        client.post("/account", data={"current": "nope nope", "new": "x" * 9, "repeat": "x" * 9})
+    r = client.post("/account", data={"current": PASSWORD, "new": "y" * 9, "repeat": "y" * 9})
+    assert r.status_code == 429
+    assert auth.verify_password(PASSWORD, _password_hash(engine, "daniel"))
+
+
+# --- CV ---------------------------------------------------------------------------
+
+PDF = b"%PDF-1.7\n fake but well-formed enough for the upload check\n%%EOF"
+
+
+def _extraction() -> Any:
+    from job_finder.domain import Language, ProfileData, Skill
+    from job_finder.llm.profile_extractor import ProfileExtraction
+
+    return ProfileExtraction(
+        data=ProfileData(
+            summary="Cloud architect with a decade of AWS.",
+            roles=["Cloud Architect"],
+            seniority="senior",
+            years_experience=12,
+            skills=[Skill(name="AWS", weight=5), Skill(name="Terraform", weight=4)],
+            languages=[Language(code="en", level="fluent")],
+        ),
+        search_terms=["Cloud Architect", "Platform Engineer"],  # the first is already there
+    )
+
+
+def _wait(client: TestClient, path: str, gone: str, timeout: float = 5) -> str:
+    import time
+
+    deadline = time.monotonic() + timeout
+    while True:
+        text = client.get(path).text
+        if gone not in text or time.monotonic() > deadline:
+            return text
+        time.sleep(0.05)
+
+
+@pytest.fixture
+def cv_client(engine: Engine, db_url: str, tmp_path: Any) -> Iterator[tuple[TestClient, list[int]]]:
+    calls: list[int] = []
+
+    def fake_extract(pdf: Any, profile_id: int) -> Any:
+        assert pdf.read_bytes() == PDF
+        calls.append(profile_id)
+        return _extraction()
+
+    settings = Settings(
+        database_url=db_url,
+        schedule_enabled=False,
+        web_secure_cookie=False,
+        data_dir=tmp_path / "data",
+    )
+    with TestClient(create_app(settings, extract=fake_extract), follow_redirects=False) as c:
+        yield c, calls
+
+
+def _profile(engine: Engine, name: str = "daniel") -> Profile:
+    with session(engine, commit=False) as s:
+        db = repo.find_profile(s, name)
+        assert db is not None
+        return repo.profile_from(db)
+
+
+def test_cv_upload_review_and_save(
+    engine: Engine, cv_client: tuple[TestClient, list[int]], tmp_path: Any
+) -> None:
+    client, calls = cv_client
+    pid = add_profile(engine, "daniel")
+    login(client)
+    r = client.post("/cv/upload", files={"file": ("cv.pdf", PDF, "application/pdf")})
+    assert r.status_code == 303
+    page = _wait(client, "/cv", "is reading your CV")
+    assert calls == [pid]
+    assert "Review what Claude read" in page
+    assert "Cloud architect with a decade of AWS." in page and "AWS | 5" in page
+    assert 'value="Platform Engineer"' in page and 'value="Cloud Architect"' not in page
+    assert _profile(engine).data.summary == ""  # nothing changes before the review
+
+    form = {
+        "from_draft": "1",
+        "summary": "Cloud architect, edited.",
+        "roles": "Cloud Architect\nPlatform Engineer",
+        "seniority": "senior",
+        "years_experience": "12",
+        "skills": "AWS | 5\nTerraform | 4\nKubernetes",
+        "languages": "en | fluent\npt | native",
+        "industries": "energy",
+        "certifications": "",
+        "terms": ["Platform Engineer", "Injected term"],
+    }
+    r = client.post("/cv", data=form)
+    assert r.status_code == 303 and r.headers["location"] == "/cv?saved=1"
+    p = _profile(engine)
+    assert p.data.summary == "Cloud architect, edited."
+    assert [(k.name, k.weight) for k in p.data.skills] == [
+        ("AWS", 5),
+        ("Terraform", 4),
+        ("Kubernetes", 3),
+    ]
+    assert [(x.code, x.level) for x in p.data.languages] == [("en", "fluent"), ("pt", "native")]
+    assert [(q.term, q.active) for q in p.queries] == [
+        ("Cloud Architect", True),
+        ("Platform Engineer", True),
+    ]
+    stored = tmp_path / "data" / "resumes" / f"{pid}.pdf"
+    assert stored.read_bytes() == PDF
+    assert not (tmp_path / "data" / "resumes" / "pending" / f"{pid}.pdf").exists()
+    with session(engine, commit=False) as s:
+        assert s.get_one(ProfileDB, pid).resume_path == str(stored)
+    assert "Review what Claude read" not in client.get("/cv").text
+
+
+def test_cv_discard_changes_nothing(
+    engine: Engine, cv_client: tuple[TestClient, list[int]], tmp_path: Any
+) -> None:
+    client, _ = cv_client
+    pid = add_profile(engine, "daniel")
+    login(client)
+    client.post("/cv/upload", files={"file": ("cv.pdf", PDF, "application/pdf")})
+    _wait(client, "/cv", "is reading your CV")
+    assert client.post("/cv/discard").status_code == 303
+    assert list((tmp_path / "data" / "resumes" / "pending").iterdir()) == []
+    assert _profile(engine).data.summary == ""
+    assert [q.term for q in _profile(engine).queries] == ["Cloud Architect"]
+    with session(engine, commit=False) as s:
+        assert s.get_one(ProfileDB, pid).resume_path is None
+
+
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        (b"", "Choose a PDF"),
+        (b"MZ\x90\x00 not a pdf", "not a PDF"),
+        (b"%PDF-" + b"0" * (10 * 1024 * 1024), "larger than 10 MB"),
+    ],
+)
+def test_cv_upload_is_checked(
+    engine: Engine, cv_client: tuple[TestClient, list[int]], content: bytes, message: str
+) -> None:
+    client, calls = cv_client
+    add_profile(engine, "daniel")
+    login(client)
+    r = client.post("/cv/upload", files={"file": ("cv.pdf", content, "application/pdf")})
+    assert r.status_code == 422 and message in r.text
+    assert calls == []
+
+
+def test_cv_extraction_failure_is_shown(engine: Engine, db_url: str, tmp_path: Any) -> None:
+    def broken(pdf: Any, profile_id: int) -> Any:
+        raise RuntimeError("Claude is down")
+
+    add_profile(engine, "daniel")
+    settings = Settings(
+        database_url=db_url,
+        schedule_enabled=False,
+        web_secure_cookie=False,
+        data_dir=tmp_path / "data",
+    )
+    with TestClient(create_app(settings, extract=broken), follow_redirects=False) as client:
+        login(client)
+        client.post("/cv/upload", files={"file": ("cv.pdf", PDF, "application/pdf")})
+        page = _wait(client, "/cv", "is reading your CV")
+    assert "Could not read the CV: RuntimeError: Claude is down" in page
+    assert list((tmp_path / "data" / "resumes" / "pending").iterdir()) == []
+
+
+def test_profile_data_can_be_edited_without_a_cv(
+    engine: Engine, cv_client: tuple[TestClient, list[int]]
+) -> None:
+    client, _ = cv_client
+    add_profile(engine, "daniel")
+    login(client)
+    r = client.post("/cv", data={"summary": "Hand written.", "skills": "SEO | 9", "languages": ""})
+    assert r.status_code == 422 and "SEO | 9" in r.text  # weight out of range, kept as typed
+    r = client.post(
+        "/cv",
+        data={
+            "summary": "Hand written.",
+            "skills": "SEO | 4",
+            "languages": "en | avançado",
+            "terms": "Injected term",
+        },
+    )
+    assert r.status_code == 303
+    p = _profile(engine)
+    assert p.data.summary == "Hand written." and p.data.languages[0].level == "advanced"
+    assert [q.term for q in p.queries] == ["Cloud Architect"]  # terms only come with a draft
+
+
+def test_parse_cv_form() -> None:
+    from job_finder.web import cv
+
+    parsed = cv.parse_data(
+        {
+            "seniority": "wizard",
+            "years_experience": "ten",
+            "skills": "AWS | 5\naws | 2\n | 3\nGo | 0",
+            "languages": "en | fluent\nfr | so-so",
+        },
+        {"fluente": "fluent"},
+    )
+    assert parsed.errors == {
+        "seniority": "wizard",
+        "years_experience": "ten",
+        "skills": "Go | 0",
+        "languages": "fr | so-so",
+    }
+    assert [k.name for k in parsed.data.skills] == ["AWS"]  # repeated line dropped
+
+
+# --- search now and status ---------------------------------------------------------
+
+
+def test_search_now_runs_in_the_background_and_reports(engine: Engine, db_url: str) -> None:
+    import threading
+
+    from job_finder.connectors import base
+
+    release = threading.Event()
+    started = threading.Event()
+
+    class Slow:
+        name = "slowtest"
+        daily_limit = 3
+
+        def search(self, queries: object, quota: Quota) -> list[RawJob]:
+            started.set()
+            release.wait(5)
+            quota.consume()
+            return [raw("s1", "Cloud Architect at Slow", source="slowtest")]
+
+    base.register("slowtest")(lambda http: Slow())
+    add_profile(engine, "daniel")
+    settings = Settings(
+        database_url=db_url,
+        schedule_enabled=False,
+        web_secure_cookie=False,
+        connectors=["slowtest"],
+    )
+    with TestClient(create_app(settings), follow_redirects=False) as client:
+        login(client)
+        r = client.post("/search")
+        assert r.status_code == 303 and r.headers["location"] == "/status"
+        assert started.wait(5)
+        page = client.get("/status").text
+        assert "Collecting from slowtest (1 of 1)" in page
+        assert 'http-equiv="refresh"' in page and 'action="/search"' not in page
+        jobs = client.get("/jobs").text
+        assert "Search in progress" in jobs and "disabled" in jobs
+        assert client.post("/search").status_code == 303  # a second click starts nothing
+        release.set()
+        page = _wait(client, "/status", 'http-equiv="refresh"')
+    assert "1 jobs passed your filters, 0 scored by Claude" in page
+    assert "no ANTHROPIC_API_KEY" in page  # the run's warning reaches the page
+    assert "1 / 3" in page  # slowtest: one request of the three allowed today
+    with session(engine, commit=False) as s:
+        from job_finder.db.models import RunDB
+
+        assert [r.kind for r in s.scalars(select(RunDB))] == ["on_demand"]
+
+
+def test_status_shows_cost_shared_and_yours(engine: Engine, client: TestClient) -> None:
+    from job_finder.db.models import LLMCostDB
+
+    me = add_profile(engine, "daniel")
+    other = add_profile(engine, "bob")
+    with session(engine) as s:
+        for pid, cost in ((me, 0.25), (other, 0.5), (me, 0.25)):
+            s.add(LLMCostDB(profile_id=pid, operation="scoring", model="m", cost_usd=cost))
+        s.add(LLMCostDB(profile_id=other, operation="extract_profile", model="m", cost_usd=1.0))
+    login(client)
+    page = client.get("/status").text
+    assert "US$ 2.00 of US$ 5.00 (yours: US$ 0.50)" in page
+    assert "Scoring jobs" in page and "Reading CVs" in page
+
+
+def test_progress_is_reported(engine: Engine) -> None:
+    from job_finder.service import full_run
+
+    add_profile(engine, "daniel")
+    steps: list[str] = []
+    full_run(
+        engine,
+        Settings(),
+        connectors=[Source([raw("1", "Cloud Architect")])],
+        progress=lambda key, params: steps.append(key),
+        now=NOW,
+    )
+    assert steps == ["progress.collect", "progress.store", "progress.filter"]

@@ -15,7 +15,7 @@ from job_finder.db.session import session
 from job_finder.i18n import t
 from job_finder.llm.client import LLMClient, is_fatal, make_client
 from job_finder.llm.scorer import ScoringSummary, score_pending
-from job_finder.pipeline.run import ProfileSummary, RunSummary, execute_run
+from job_finder.pipeline.run import ProfileSummary, Progress, RunSummary, execute_run, no_progress
 
 log = logging.getLogger(__name__)
 
@@ -61,6 +61,7 @@ def full_run(
     connectors: Sequence[Connector] | None = None,
     client: LLMClient | None = None,
     now: datetime | None = None,
+    progress: Progress = no_progress,
 ) -> Report:
     """Runs the pipeline. Scheduled runs skip paused profiles.
 
@@ -78,7 +79,13 @@ def full_run(
         if connectors is None:
             connectors = [base.create(name, http) for name in settings.connectors]
         run = execute_run(
-            s, engine, connectors, profiles, now=now, kind="dry_run" if dry_run else kind
+            s,
+            engine,
+            connectors,
+            profiles,
+            now=now,
+            kind="dry_run" if dry_run else kind,
+            progress=progress,
         )
 
     report = Report(
@@ -107,6 +114,7 @@ def full_run(
                 cutoff=settings.relevance_cutoff,
                 now=now,
                 run_id=run.run_id,
+                progress=progress,
             )
         except Exception as e:
             if not is_fatal(e):
