@@ -152,13 +152,14 @@ def evaluate(
     profile_id: int | None = None,
     run_id: int | None = None,
     examples: Sequence[Example] = (),
+    operation: str = OPERATION,
 ) -> FitResult:
     content = job_message(job)
     if examples:
         content = f"{examples_block(list(examples))}\n\n{content}"
     return client.structured(
         FitResult,
-        operation=OPERATION,
+        operation=operation,
         model=model,
         profile_id=profile_id,
         run_id=run_id,

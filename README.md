@@ -30,6 +30,13 @@ on a Raspberry Pi.
 
 Bot messages and Claude's text follow `JOBFINDER_LANGUAGE` (`en` or `pt-BR`).
 
+To check whether the scoring model fits your taste, `job-finder eval -p <name>`
+scores your saved and dismissed jobs again with Haiku and Opus (`--model` to
+choose) and shows how well each one tells them apart (AUC, mean scores, what
+the digest would have shown) and what it cost. It prints an estimate and asks
+before spending; `--limit 5` tries a small sample first. Nothing in your jobs
+changes.
+
 ## Development
 
 ```bash

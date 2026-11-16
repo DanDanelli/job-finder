@@ -1,11 +1,11 @@
 """Command line: `job-finder ...`."""
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 from zoneinfo import ZoneInfo
 
 import typer
@@ -18,6 +18,9 @@ from job_finder.db import repo
 from job_finder.db import session as db_session
 from job_finder.db.models import ProfileDB
 from job_finder.domain import Job
+
+if TYPE_CHECKING:
+    from job_finder.llm.model_eval import EvalReport
 
 app = typer.Typer(help="Job Finder: finds jobs and ranks them by fit with your CV.")
 db_app = typer.Typer(help="Database.")
@@ -444,6 +447,135 @@ def evaluate(
     for b in buttons:
         if b.url:
             console.print(b.url, markup=False)
+
+
+DEFAULT_EVAL_MODELS = ["claude-haiku-5-5", "claude-opus-5-5"]
+
+
+@app.command("eval")
+def eval_models(
+    profile: ProfileOption,
+    model: Annotated[
+        list[str] | None,
+        typer.Option("--model", "-m", help="Model to evaluate (repeatable)."),
+    ] = None,
+    limit: Annotated[
+        int | None, typer.Option("--limit", min=1, help="Only the first N labeled jobs.")
+    ] = None,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the cost confirmation.")] = False,
+) -> None:
+    """Scores the profile's saved and dismissed jobs again with each model and measures how
+    well the scores separate them. Spends Claude credit; writes only to llm_costs."""
+    from job_finder.llm.client import make_client
+    from job_finder.llm.model_eval import estimate, load_labeled, run_eval
+
+    settings = get_settings()
+    if settings.anthropic_api_key is None:
+        raise typer.BadParameter("ANTHROPIC_API_KEY is not set (put it in .env)")
+    models = model or DEFAULT_EVAL_MODELS
+    engine = _engine()
+    profile_id = _profile_id(engine, profile)
+    labeled = load_labeled(engine, profile_id)
+    jobs = min(len(labeled), limit) if limit else len(labeled)
+    saved = sum(item.saved for item in labeled[:jobs])
+    if saved == 0 or saved == jobs:
+        raise typer.BadParameter(
+            f"'{profile}' needs both saved and dismissed jobs ({saved} saved of {jobs})"
+        )
+
+    guess = estimate(engine, models, jobs)
+    client = make_client(engine)
+    spent = client.spent_this_month()
+    basis = f"from {guess.basis} past scoring calls" if guess.basis else "a rough guess"
+    console.print(
+        f"[bold]{profile}[/]: {jobs} labeled jobs ({saved} saved) x {len(models)} models"
+        f" ({', '.join(models)}) = {guess.calls} calls, about US$ {guess.cost_usd:.2f}"
+        f" ({basis}). Spent this month: US$ {spent:.2f} of US$ {settings.monthly_cost_cap_usd:.2f}."
+    )
+    if not yes:
+        typer.confirm("Run the eval?", abort=True)
+
+    with _claude_errors(), console.status("Evaluating...") as status:
+        report = run_eval(
+            engine,
+            client,
+            profile_id,
+            models=models,
+            language=settings.language,
+            limit=limit,
+            progress=lambda m, i, n: status.update(f"Evaluating with {m}: {i}/{n}"),
+        )
+    _show_eval(report, settings.digest_min_score)
+    console.print(f"Claude spend this month: US$ {client.spent_this_month():.4f}")
+
+
+def _show_eval(report: "EvalReport", digest_min_score: int) -> None:
+    from job_finder.llm.model_eval import STORED
+
+    def num(value: float | None, fmt: str = ".2f") -> str:
+        return "-" if value is None else format(value, fmt)
+
+    def short(model: str) -> str:
+        return model.removeprefix("claude-")
+
+    columns = [STORED, *report.models]
+    table = Table(title=f"Saved vs dismissed: {report.profile}")
+    table.add_column("")
+    for column in columns:
+        table.add_column("production" if column == STORED else short(column), justify="right")
+    stats = {c: report.metrics(c, digest_min_score) for c in columns}
+
+    def cost(column: str, per_job: bool = False) -> str:
+        spent = report.cost_by_model.get(column)
+        calls = report.calls_by_model.get(column, 0)
+        if spent is None or (per_job and not calls):
+            return "-"
+        return f"{spent / calls:.4f}" if per_job else f"{spent:.3f}"
+
+    rows: list[tuple[str, Callable[[str], str]]] = [
+        ("Jobs scored", lambda c: str(stats[c].n)),
+        ("AUC (0.5 = chance)", lambda c: num(stats[c].auc)),
+        ("Mean score, saved", lambda c: num(stats[c].mean_saved, ".1f")),
+        ("Mean score, dismissed", lambda c: num(stats[c].mean_dismissed, ".1f")),
+        ("Gap", lambda c: num(stats[c].mean_gap, "+.1f")),
+        ("Top-k precision, k = saved", lambda c: num(stats[c].precision_at_saved)),
+        (
+            f"Saved at ≥{digest_min_score} (digest)",
+            lambda c: f"{stats[c].saved_in_digest}/{stats[c].saved}",
+        ),
+        (
+            f"Dismissed at ≥{digest_min_score} (digest)",
+            lambda c: f"{stats[c].dismissed_in_digest}/{stats[c].n - stats[c].saved}",
+        ),
+        ("US$ (this eval)", cost),
+        ("US$ per job", lambda c: cost(c, per_job=True)),
+    ]
+    for name, cell in rows:
+        table.add_row(name, *(cell(c) for c in columns))
+    console.print(table)
+
+    jobs = Table(title="Per job")
+    for header in (
+        "Decision",
+        "Job",
+        "Company",
+        *("stored" if c == STORED else short(c) for c in columns),
+    ):
+        jobs.add_column(header, overflow="fold")
+    for row in sorted(report.rows, key=lambda r: (not r.labeled.saved, r.labeled.job.title)):
+        item = row.labeled
+        scores = [item.stored_score if c == STORED else row.scores.get(c) for c in columns]
+        jobs.add_row(
+            "saved" if item.saved else "dismissed",
+            item.job.title,
+            item.job.company or "-",
+            *("-" if s is None else str(s) for s in scores),
+        )
+    console.print(jobs)
+    for failure in report.failures:
+        console.print(f"[red]⚠ {failure}[/]")
+    if report.interrupted:
+        console.print(f"[red]⚠ {report.interrupted}[/]")
 
 
 @app.command()
