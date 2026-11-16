@@ -29,6 +29,9 @@ SOURCE_NAMES = {
     "himalayas": "Himalayas",
     "adzuna": "Adzuna",
     "weworkremotely": "We Work Remotely",
+    # Credits on jobs name the origin site instead (see _source_name); this is for the
+    # site's Status page and progress.
+    "jsearch": "JSearch (Google for Jobs)",
 }
 SOURCE_LINKS = {"adzuna": "https://www.adzuna.co.uk"}  # default when the job has no site
 WORK_MODES = {"remote", "hybrid", "onsite"}
