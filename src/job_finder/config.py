@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     schedule_enabled: bool = True
     run_times: list[time] = [time(8), time(18)]
     # Digest: jobs with score >= minimum, at most N per message (the rest waits for the next).
-    digest_min_score: int = Field(default=60, ge=0, le=100)
+    digest_min_score: int = Field(default=70, ge=0, le=100)
     digest_max_jobs: int = Field(default=10, ge=1)
 
     # JSearch (Google for Jobs), key from app.openwebninja.com.
