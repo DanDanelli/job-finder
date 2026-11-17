@@ -35,6 +35,7 @@
 </form>
 </div>
 
+{% if tab == "dismissed" %}<p class="muted">{{ t("web.jobs.dismissed_window", days=dismissed_days) }}</p>{% endif %}
 {% if tab == "new" and counts.pending %}<p class="muted">{{ t("web.jobs.pending", n=counts.pending) }}</p>{% endif %}
 
 {% for card in cards %}{% set j = card.item %}

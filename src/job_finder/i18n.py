@@ -131,6 +131,10 @@ MESSAGES: dict[str, dict[str, str]] = {
         "web.tab.dismissed": "Dismissed",
         "web.jobs.pending": "{n} more waiting to be scored in the next run.",
         "web.jobs.empty": "No jobs here.",
+        "web.jobs.dismissed_window": (
+            "Dismissed in the last {days} days. Older ones leave this list but keep teaching"
+            " Claude."
+        ),
         "web.jobs.min_score": "Minimum fit",
         "web.jobs.work_mode": "Work mode",
         "web.jobs.any": "Any",
@@ -450,6 +454,10 @@ MESSAGES: dict[str, dict[str, str]] = {
         "web.tab.dismissed": "Descartadas",
         "web.jobs.pending": "Mais {n} aguardando avaliação na próxima rodada.",
         "web.jobs.empty": "Nenhuma vaga aqui.",
+        "web.jobs.dismissed_window": (
+            "Descartadas nos últimos {days} dias. As mais antigas saem desta lista, mas"
+            " continuam ensinando o Claude."
+        ),
         "web.jobs.min_score": "Fit mínimo",
         "web.jobs.work_mode": "Modalidade",
         "web.jobs.any": "Qualquer",

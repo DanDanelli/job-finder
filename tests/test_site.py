@@ -301,6 +301,26 @@ def test_applied_leaves_saved_and_can_go_back(engine: Engine, client: TestClient
     assert actions == ["save", "apply", "save"]
 
 
+def test_old_dismissals_leave_the_site_but_not_learning(engine: Engine, client: TestClient) -> None:
+    from job_finder.llm import learner
+
+    pid = add_profile(engine, "daniel")
+    old, recent = add_matches(
+        engine, "daniel", [raw("1", "Old Architect"), raw("2", "Recent Architect")]
+    )
+    login(client)
+    for match_id in (old, recent):
+        client.post(f"/matches/{match_id}", data={"action": "dismiss"})
+    with session(engine) as s:
+        s.get_one(MatchDB, old).updated_at = NOW - timedelta(days=8)
+
+    page = client.get("/jobs?tab=dismissed").text
+    assert "Recent Architect" in page and "Old Architect" not in page
+    assert "last 7 days" in page
+    assert '<span class="count">1</span>' in page
+    assert learner.state(engine, pid).dismissed == 2
+
+
 def test_note_with_a_decision_and_on_its_own(engine: Engine, client: TestClient) -> None:
     add_profile(engine, "daniel")
     (match_id,) = add_matches(engine, "daniel", [raw("1", "Cloud Architect")])

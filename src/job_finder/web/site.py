@@ -11,7 +11,7 @@ Protection:
 import asyncio
 import logging
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import urlencode, urlsplit
@@ -238,8 +238,15 @@ def mount_site(
     ) -> HTMLResponse:
         tab = tab if tab in data.TABS else "new"
         sort = sort if sort in data.SORTS else "score_desc"
+        since = now() - timedelta(days=settings.web_dismissed_days)
         cards = data.job_cards(
-            engine, profile.id, tab, min_score=min_score, work_mode=mode or None, sort=sort
+            engine,
+            profile.id,
+            tab,
+            min_score=min_score,
+            work_mode=mode or None,
+            sort=sort,
+            dismissed_since=since,
         )
         return page(
             request,
@@ -248,7 +255,8 @@ def mount_site(
             nav="jobs",
             tab=tab,
             tabs=list(data.TABS),
-            counts=data.counts(engine, profile.id),
+            counts=data.counts(engine, profile.id, dismissed_since=since),
+            dismissed_days=settings.web_dismissed_days,
             cards=cards,
             min_score=min_score,
             mode=mode,

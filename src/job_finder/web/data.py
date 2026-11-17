@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import ColumnElement, Engine, exists, func, select
+from sqlalchemy import ColumnElement, Engine, exists, func, or_, select, true
 from sqlalchemy.orm import selectinload
 
 from job_finder.db import repo
@@ -46,12 +46,22 @@ class JobCard:
     note: str | None = None
 
 
-def counts(engine: Engine, profile_id: int) -> dict[str, int]:
+def _shown(dismissed_since: datetime | None) -> ColumnElement[bool]:
+    """Matches the site lists: every status, except dismissals older than
+    `dismissed_since` (None: all of them)."""
+    if dismissed_since is None:
+        return true()
+    return or_(MatchDB.status != MatchStatus.DISMISSED, MatchDB.updated_at >= dismissed_since)
+
+
+def counts(
+    engine: Engine, profile_id: int, *, dismissed_since: datetime | None = None
+) -> dict[str, int]:
     """Matches per tab, plus "pending" (waiting for scoring)."""
     with session(engine, commit=False) as s:
         rows = s.execute(
             select(MatchDB.status, func.count())
-            .where(MatchDB.profile_id == profile_id)
+            .where(MatchDB.profile_id == profile_id, _shown(dismissed_since))
             .group_by(MatchDB.status)
         ).all()
     by_status = {str(status): n for status, n in rows}
@@ -69,6 +79,7 @@ def job_cards(
     work_mode: str | None = None,
     sort: str = "score_desc",
     limit: int = 100,
+    dismissed_since: datetime | None = None,
 ) -> list[JobCard]:
     status = TABS.get(tab, MatchStatus.NEW)
     posted = func.coalesce(JobDB.posted_at, JobDB.created_at)
@@ -87,6 +98,7 @@ def job_cards(
             MatchDB.status == status,
             MatchDB.score.is_not(None),
             MatchDB.score >= min_score,
+            _shown(dismissed_since),
         )
         .options(
             selectinload(MatchDB.job).selectinload(JobDB.sources),

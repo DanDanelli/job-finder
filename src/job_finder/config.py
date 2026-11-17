@@ -111,6 +111,9 @@ class Settings(BaseSettings):
     # serve); plain HTTP on the home network gets a cookie without it. False never sets it.
     web_secure_cookie: bool = True
     web_session_days: int = Field(default=30, ge=1)
+    # The Dismissed tab shows the last N days of dismissals (enough to undo a mistake).
+    # Older ones only leave the site: they stay in the database and keep teaching Claude.
+    web_dismissed_days: int = Field(default=7, ge=1)
 
     # Learned rules (llm/learner.py): after a scheduled run, when a profile has at least
     # `learning_min_decisions` saved/dismissed jobs and new ones since Claude last
