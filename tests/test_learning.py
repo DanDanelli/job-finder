@@ -73,6 +73,21 @@ def test_propose_stores_a_draft_and_approval_moves_it_into_use(engine: Engine) -
     assert (st.rules, st.draft) == (["Dismisses consultancies", "Likes platform teams"], None)
 
 
+def test_applied_jobs_count_as_liked(engine: Engine) -> None:
+    pid = add_profile(engine, "daniel")
+    decide(engine, "daniel", 4, saved=2)
+    with session(engine) as s:
+        first = s.scalars(
+            select(MatchDB).where(MatchDB.status == MatchStatus.SAVED).order_by(MatchDB.id)
+        ).first()
+        assert first is not None
+        first.status = MatchStatus.APPLIED
+
+    st = learner.state(engine, pid)
+    assert (st.saved, st.dismissed) == (2, 2)
+    assert [d.saved for d in learner.decisions(engine, pid)].count(True) == 2
+
+
 def test_the_latest_note_is_the_one_claude_sees(engine: Engine) -> None:
     from job_finder.db import repo
 

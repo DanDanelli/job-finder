@@ -22,7 +22,7 @@ from sqlalchemy import Engine, exists, func, select
 from job_finder.db import repo
 from job_finder.db.models import FeedbackDB, LLMCostDB, MatchDB, ProfileDB
 from job_finder.db.session import session
-from job_finder.domain import Job, MatchStatus
+from job_finder.domain import DECIDED, LIKED, Job
 from job_finder.llm.client import (
     PRICES,
     CostCapReached,
@@ -55,15 +55,12 @@ def load_labeled(engine: Engine, profile_id: int) -> list[Labeled]:
             select(MatchDB)
             .where(
                 MatchDB.profile_id == profile_id,
-                MatchDB.status.in_((MatchStatus.SAVED, MatchStatus.DISMISSED)),
+                MatchDB.status.in_(DECIDED),
                 exists().where(FeedbackDB.match_id == MatchDB.id),
             )
             .order_by(MatchDB.id)
         ).all()
-        return [
-            Labeled(m.id, m.status == MatchStatus.SAVED, repo.job_from(m.job), m.score)
-            for m in matches
-        ]
+        return [Labeled(m.id, m.status in LIKED, repo.job_from(m.job), m.score) for m in matches]
 
 
 def sample(labeled: Sequence[Labeled], limit: int | None) -> list[Labeled]:

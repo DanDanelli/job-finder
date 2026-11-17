@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from job_finder.db import repo
 from job_finder.db.models import FeedbackDB, MatchDB
-from job_finder.domain import Job, MatchStatus
+from job_finder.domain import DECIDED, LIKED, Job
 from job_finder.pipeline.prerank import bm25, tokens
 
 MAX_EXAMPLES = 4
@@ -50,7 +50,7 @@ def load_examples(s: Session, profile_id: int, limit: int = POOL) -> list[Exampl
         select(MatchDB)
         .where(
             MatchDB.profile_id == profile_id,
-            MatchDB.status.in_((MatchStatus.SAVED, MatchStatus.DISMISSED)),
+            MatchDB.status.in_(DECIDED),
             exists().where(FeedbackDB.match_id == MatchDB.id),
         )
         .order_by(MatchDB.updated_at.desc())
@@ -62,7 +62,7 @@ def load_examples(s: Session, profile_id: int, limit: int = POOL) -> list[Exampl
         examples.append(
             Example(
                 match_id=m.id,
-                saved=m.status == MatchStatus.SAVED,
+                saved=m.status in LIKED,
                 title=job.title,
                 company=job.company,
                 location=job.location_text,

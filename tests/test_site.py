@@ -281,6 +281,26 @@ def test_save_dismiss_restore(engine: Engine, client: TestClient) -> None:
     assert actions == [("save", "web"), ("dismiss", "web"), ("restore", "web")]
 
 
+def test_applied_leaves_saved_and_can_go_back(engine: Engine, client: TestClient) -> None:
+    add_profile(engine, "daniel")
+    (match_id,) = add_matches(engine, "daniel", [raw("1", "Cloud Architect")])
+    login(client)
+    client.post(f"/matches/{match_id}", data={"action": "save"})
+    assert 'value="apply"' in client.get("/jobs?tab=saved").text
+
+    client.post(f"/matches/{match_id}", data={"action": "apply"})
+    assert "Cloud Architect" not in client.get("/jobs?tab=saved").text
+    page = client.get("/jobs?tab=applied").text
+    assert "Cloud Architect" in page and 'value="apply"' not in page
+    assert '<span class="count">1</span>' in page
+
+    client.post(f"/matches/{match_id}", data={"action": "save"})  # "Back to saved"
+    with session(engine) as s:
+        assert s.get_one(MatchDB, match_id).status == MatchStatus.SAVED
+        actions = [f.action for f in s.scalars(select(FeedbackDB))]
+    assert actions == ["save", "apply", "save"]
+
+
 def test_note_with_a_decision_and_on_its_own(engine: Engine, client: TestClient) -> None:
     add_profile(engine, "daniel")
     (match_id,) = add_matches(engine, "daniel", [raw("1", "Cloud Architect")])

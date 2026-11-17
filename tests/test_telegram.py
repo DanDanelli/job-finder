@@ -297,11 +297,11 @@ def test_saved_and_status(engine: Engine) -> None:
 
     status = actions.status_text(engine, pid, Settings(), now=NOW)
     assert "Runs: 08:00, 18:00 (America/Sao_Paulo)" in status
-    assert "1 new, 1 saved, 0 dismissed, 0 pending" in status
+    assert "1 new, 1 saved, 0 applied, 0 dismissed, 0 pending" in status
     assert "Claude this month: US$ 0.00 of US$ 5.00" in status
 
     status_pt = actions.status_text(engine, pid, Settings(language="pt-BR"), now=NOW)
-    assert "1 novas, 1 salvas, 0 descartadas, 0 pendentes" in status_pt
+    assert "1 novas, 1 salvas, 0 candidatadas, 0 descartadas, 0 pendentes" in status_pt
 
 
 def test_pause_removes_the_profile_from_scheduled_runs(engine: Engine) -> None:

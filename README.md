@@ -85,8 +85,10 @@ printf '%s\n' "$PASSWORD" | docker compose exec -T job-finder job-finder profile
 
 Pages:
 
-- **Jobs**: New / Saved / Dismissed tabs, minimum fit and work mode filters,
-  sorted by fit or by posting date (either way); save, dismiss, restore.
+- **Jobs**: New / Saved / Applied / Dismissed tabs, minimum fit and work mode
+  filters, sorted by fit or by posting date (either way); save, dismiss, restore.
+  **I applied** moves a saved job to Applied, off the saved list; for learning it
+  still counts as a job you liked.
   **Search now** runs a search for your profile in the background.
 - **Profile**: searches, filters, preferences for Claude, pause. Tightening a
   filter removes the matches it now rejects that nobody has seen yet (not sent

@@ -16,7 +16,7 @@ from sqlalchemy import Engine, func, select
 from job_finder.db import repo
 from job_finder.db.models import FeedbackDB, MatchDB, ProfileDB
 from job_finder.db.session import session
-from job_finder.domain import MatchStatus
+from job_finder.domain import DECIDED, LIKED, MatchStatus
 from job_finder.i18n import language_name
 from job_finder.llm.client import LLMClient
 from job_finder.llm.scorer import profile_block
@@ -79,7 +79,7 @@ def decisions(engine: Engine, profile_id: int, limit: int = MAX_DECISIONS) -> li
             select(MatchDB)
             .where(
                 MatchDB.profile_id == profile_id,
-                MatchDB.status.in_((MatchStatus.SAVED, MatchStatus.DISMISSED)),
+                MatchDB.status.in_(DECIDED),
                 MatchDB.feedback.any(),
             )
             .order_by(MatchDB.updated_at.desc())
@@ -90,7 +90,7 @@ def decisions(engine: Engine, profile_id: int, limit: int = MAX_DECISIONS) -> li
             job = repo.job_from(m.job)
             result.append(
                 Decision(
-                    saved=m.status == MatchStatus.SAVED,
+                    saved=m.status in LIKED,
                     title=job.title,
                     company=job.company,
                     location=job.location_text,
@@ -150,7 +150,7 @@ def state(engine: Engine, profile_id: int) -> LearningState:
                 select(MatchDB.status, func.count())
                 .where(
                     MatchDB.profile_id == profile_id,
-                    MatchDB.status.in_((MatchStatus.SAVED, MatchStatus.DISMISSED)),
+                    MatchDB.status.in_(DECIDED),
                     MatchDB.feedback.any(),
                 )
                 .group_by(MatchDB.status)
@@ -167,7 +167,7 @@ def state(engine: Engine, profile_id: int) -> LearningState:
             rules=list(p.learned_rules or []),
             draft=list(p.rules_draft) if p.rules_draft is not None else None,
             checked_at=p.rules_checked_at,
-            saved=counts.get(MatchStatus.SAVED, 0),
+            saved=sum(counts.get(s, 0) for s in LIKED),
             dismissed=counts.get(MatchStatus.DISMISSED, 0),
             new_since_check=s.scalar(newer) or 0,
         )

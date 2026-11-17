@@ -156,7 +156,7 @@ class FeedbackDB(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     match_id: Mapped[int] = mapped_column(ForeignKey("matches.id", ondelete="CASCADE"), index=True)
-    action: Mapped[str] = mapped_column(String(16))  # save | dismiss | restore | note
+    action: Mapped[str] = mapped_column(String(16))  # save | apply | dismiss | restore | note
     origin: Mapped[str] = mapped_column(String(16))  # telegram | web
     # The person's note on the job ("why"). The newest non-null one is the current note;
     # "" means they cleared it. See repo.latest_note.

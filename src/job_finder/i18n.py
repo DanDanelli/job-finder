@@ -67,7 +67,8 @@ MESSAGES: dict[str, dict[str, str]] = {
         "status.runs": "Runs: {times} ({timezone})",
         "status.last_run": "Last run: {when}, {status}, {new} new jobs",
         "status.jobs": (
-            "Jobs: {new} new, {saved} saved, {dismissed} dismissed, {pending} pending,"
+            "Jobs: {new} new, {saved} saved, {applied} applied, {dismissed} dismissed,"
+            " {pending} pending,"
             " {skipped} off-profile"
         ),
         "status.claude": "Claude this month: US$ {spent} of US$ {cap}",
@@ -126,6 +127,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "web.nav.profile": "Profile",
         "web.tab.new": "New",
         "web.tab.saved": "Saved",
+        "web.tab.applied": "Applied",
         "web.tab.dismissed": "Dismissed",
         "web.jobs.pending": "{n} more waiting to be scored in the next run.",
         "web.jobs.empty": "No jobs here.",
@@ -135,6 +137,8 @@ MESSAGES: dict[str, dict[str, str]] = {
         "web.jobs.filter": "Apply",
         "web.jobs.posted": "posted {date}",
         "web.action.save": "Save",
+        "web.action.apply": "I applied",
+        "web.action.unapply": "Back to saved",
         "web.action.dismiss": "Dismiss",
         "web.action.restore": "Back to new",
         "web.action.open": "Open",
@@ -383,7 +387,8 @@ MESSAGES: dict[str, dict[str, str]] = {
         "status.runs": "Rodadas: {times} ({timezone})",
         "status.last_run": "Última rodada: {when}, {status}, {new} vagas novas",
         "status.jobs": (
-            "Vagas: {new} novas, {saved} salvas, {dismissed} descartadas, {pending} pendentes,"
+            "Vagas: {new} novas, {saved} salvas, {applied} candidatadas,"
+            " {dismissed} descartadas, {pending} pendentes,"
             " {skipped} fora do perfil"
         ),
         "status.claude": "Claude no mês: US$ {spent} de US$ {cap}",
@@ -441,6 +446,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "web.nav.profile": "Perfil",
         "web.tab.new": "Novas",
         "web.tab.saved": "Salvas",
+        "web.tab.applied": "Candidatadas",
         "web.tab.dismissed": "Descartadas",
         "web.jobs.pending": "Mais {n} aguardando avaliação na próxima rodada.",
         "web.jobs.empty": "Nenhuma vaga aqui.",
@@ -450,6 +456,8 @@ MESSAGES: dict[str, dict[str, str]] = {
         "web.jobs.filter": "Aplicar",
         "web.jobs.posted": "publicada em {date}",
         "web.action.save": "Salvar",
+        "web.action.apply": "Me candidatei",
+        "web.action.unapply": "Voltar para salvas",
         "web.action.dismiss": "Descartar",
         "web.action.restore": "Voltar para novas",
         "web.action.open": "Abrir",

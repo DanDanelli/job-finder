@@ -27,8 +27,15 @@ class MatchStatus(StrEnum):
     PENDING = "pending"  # passed the filters, waiting for scoring (or scoring failed)
     NEW = "new"  # scored, no user action yet
     SAVED = "saved"
+    APPLIED = "applied"  # saved, and the person has applied: off the saved list
     DISMISSED = "dismissed"
     SKIPPED = "skipped"  # below the relevance cutoff; never sent to the LLM
+
+
+# The person's decisions, the labels learning reads. Applying is a stronger "yes" than
+# saving, so both count as liked.
+LIKED = (MatchStatus.SAVED, MatchStatus.APPLIED)
+DECIDED = (*LIKED, MatchStatus.DISMISSED)
 
 
 SalaryPeriod = Literal["year", "month", "hour"]

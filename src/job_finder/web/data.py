@@ -21,11 +21,13 @@ from job_finder.telegram.digest import DigestItem, digest_item
 TABS: dict[str, MatchStatus] = {
     "new": MatchStatus.NEW,
     "saved": MatchStatus.SAVED,
+    "applied": MatchStatus.APPLIED,
     "dismissed": MatchStatus.DISMISSED,
 }
 # Site action -> (new status, feedback action recorded)
 ACTIONS: dict[str, tuple[MatchStatus, str]] = {
     "save": (MatchStatus.SAVED, "save"),
+    "apply": (MatchStatus.APPLIED, "apply"),
     "dismiss": (MatchStatus.DISMISSED, "dismiss"),
     "restore": (MatchStatus.NEW, "restore"),
 }
@@ -105,7 +107,7 @@ def job_cards(
 def set_status(
     engine: Engine, profile_id: int, match_id: int, action: str, note: str | None = None
 ) -> bool:
-    """Applies save / dismiss / restore, or "note" (only the note). `note` is the note
+    """Applies save / apply / dismiss / restore, or "note" (only the note). `note` is the note
     field as sent (None: the form had none); it is recorded when it changed. False if
     the match is not this profile's."""
     if action not in ACTIONS and action != "note":
