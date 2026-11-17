@@ -180,3 +180,19 @@ def test_digest_shows_the_origin_site() -> None:
     assert _source_name(source("jsearch", publisher="LinkedIn")) == "LinkedIn (Google for Jobs)"
     assert _source_name(source("remotive")) == "Remotive"
     assert _source_name(source("manual")) is None
+
+
+def test_jsearch_credit_links_to_google_for_jobs() -> None:
+    from job_finder.db.models import JobSourceDB
+    from job_finder.telegram.digest import _source_link
+
+    def source(name: str, **data: str) -> JobSourceDB:
+        return JobSourceDB(source=name, source_id="1", url="https://x.example", raw_data=data)
+
+    google = "https://www.google.com/search?q=jobs&udm=8#vhid=1"
+    assert _source_link(source("jsearch", publisher="WhatJobs", google_link=google)) == google
+    assert _source_link(source("jsearch", google_link="javascript:alert(1)")) is None
+    assert _source_link(source("jsearch")) is None
+    assert _source_link(source("adzuna")) == "https://www.adzuna.co.uk"
+    assert _source_link(source("remotive")) is None
+    assert _source_link(source("manual")) is None

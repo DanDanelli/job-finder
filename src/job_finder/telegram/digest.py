@@ -105,6 +105,19 @@ def _source_name(source: JobSourceDB) -> str | None:
     return SOURCE_NAMES.get(source.source, source.source)
 
 
+def _source_link(source: JobSourceDB) -> str | None:
+    """Where the credit links to: the source's page, as its terms ask, or for JSearch the
+    job on Google for Jobs, which lists every site that carries it. That is the way in
+    when the origin site blocks the visitor (seen with WhatJobs behind Cloudflare)."""
+    data = source.raw_data or {}
+    if source.source == "jsearch":
+        link = data.get("google_link")
+        return link if isinstance(link, str) and link.startswith("https://") else None
+    if source.source in SOURCE_LINKS:
+        return data.get("site") or SOURCE_LINKS[source.source]
+    return None
+
+
 def digest_item(m: MatchDB) -> DigestItem:
     return DigestItem(
         match_id=m.id,
@@ -122,9 +135,9 @@ def digest_item(m: MatchDB) -> DigestItem:
         url=m.job.url,
         sources=sorted({n for s in m.job.sources if (n := _source_name(s))}),
         source_links={
-            SOURCE_NAMES[s.source]: (s.raw_data or {}).get("site") or SOURCE_LINKS[s.source]
+            name: link
             for s in m.job.sources
-            if s.source in SOURCE_LINKS
+            if (name := _source_name(s)) and (link := _source_link(s))
         },
     )
 
