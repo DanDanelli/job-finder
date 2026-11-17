@@ -4,7 +4,7 @@ JavaScript).
 
 Protection:
 - every page except /login needs a session; a profile only ever sees its own data;
-- the session cookie is HttpOnly, SameSite=Lax and (by default) Secure;
+- the session cookie is HttpOnly, SameSite=Lax and Secure when served over HTTPS;
 - POSTs from another origin are refused (CSRF), on top of SameSite.
 """
 
@@ -57,6 +57,13 @@ def _same_origin(request: Request) -> bool:
         return True  # not a browser form (or a very old browser): SameSite still applies
     hosts = {request.headers.get("host"), request.headers.get("x-forwarded-host")}
     return urlsplit(origin).netloc in hosts - {None}
+
+
+def _https(request: Request) -> bool:
+    """The browser reached the site over HTTPS, directly or through a proxy that says so
+    (tailscale serve sends X-Forwarded-Proto). Plain HTTP on the home network is not."""
+    forwarded = request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
+    return request.url.scheme == "https" or forwarded == "https"
 
 
 class OriginCheck(BaseHTTPMiddleware):
@@ -203,7 +210,7 @@ def mount_site(
             token,
             max_age=settings.web_session_days * 86400,
             httponly=True,
-            secure=settings.web_secure_cookie,
+            secure=settings.web_secure_cookie and _https(request),
             samesite="lax",
         )
         return response

@@ -106,8 +106,8 @@ Pages:
   (total, per use, and yours).
 
 The pages are plain HTML forms; no JavaScript. The container listens only on
-`127.0.0.1:8000`. Reach it over Tailscale, which also gives HTTPS (the session
-cookie is `Secure` by default):
+`127.0.0.1:8000` by default. Reach it over Tailscale, which also gives HTTPS (the
+session cookie is `Secure` whenever the request came over HTTPS):
 
 ```bash
 sudo tailscale serve --bg --https=8443 http://127.0.0.1:8000
@@ -116,8 +116,14 @@ sudo tailscale serve --bg --https=8443 http://127.0.0.1:8000
 
 Someone outside your tailnet can get in if you share just that machine with
 them from the Tailscale admin console (Machines → ⋯ → Share); they use the
-full `<machine>.<tailnet>.ts.net` name. For plain HTTP on a trusted network,
-set `JOBFINDER_WEB_SECURE_COOKIE=false`.
+full `<machine>.<tailnet>.ts.net` name.
+
+To open it on your home network without Tailscale, put `BIND_ADDRESS=0.0.0.0` in
+`.env` and recreate the container (`docker compose up -d`); the site is then at
+`http://<pi-ip>:8000`. That is plain HTTP, so the password and the session travel
+unencrypted on that network: only on a network you trust, and never forward the
+port on the router. Docker publishes the port around `ufw`, so the firewall does
+not filter it.
 
 ## Sources and their terms
 

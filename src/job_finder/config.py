@@ -107,8 +107,8 @@ class Settings(BaseSettings):
     ]
     weworkremotely_daily_limit: int | None = 33  # three full runs
 
-    # Site. The cookie is Secure by default (tailscale serve gives HTTPS); turn it off
-    # only for plain-HTTP access on a trusted network.
+    # Site. The session cookie is Secure whenever the request came over HTTPS (tailscale
+    # serve); plain HTTP on the home network gets a cookie without it. False never sets it.
     web_secure_cookie: bool = True
     web_session_days: int = Field(default=30, ge=1)
 

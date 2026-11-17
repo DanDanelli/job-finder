@@ -133,11 +133,23 @@ def test_login_and_logout(engine: Engine, client: TestClient) -> None:
     assert client.get("/jobs").status_code == 303
 
 
-def test_secure_cookie_by_default(engine: Engine, db_url: str) -> None:
+@pytest.mark.parametrize(
+    ("base_url", "headers", "secure"),
+    [
+        ("https://pi.example", {}, True),
+        ("http://pi.example", {"x-forwarded-proto": "https"}, True),  # tailscale serve
+        ("http://192.168.0.10:8000", {}, False),  # home network, plain HTTP
+    ],
+)
+def test_cookie_is_secure_over_https(
+    engine: Engine, db_url: str, base_url: str, headers: dict[str, str], secure: bool
+) -> None:
     add_profile(engine, "daniel")
     app = create_app(Settings(database_url=db_url, schedule_enabled=False))
-    with TestClient(app, follow_redirects=False) as c:
-        assert "Secure" in login(c).headers["set-cookie"]
+    with TestClient(app, base_url=base_url, headers=headers, follow_redirects=False) as c:
+        r = login(c)
+        assert r.status_code == 303
+        assert ("Secure" in r.headers["set-cookie"]) is secure
 
 
 @pytest.mark.parametrize(
