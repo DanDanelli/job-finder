@@ -9,6 +9,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import Any
 
 import anthropic
 import yaml
@@ -142,6 +143,29 @@ def job_message(job: Job) -> str:
     )
 
 
+def request_params(
+    profile: Profile, job: Job, *, language: str, examples: Sequence[Example] = ()
+) -> dict[str, Any]:
+    """The request for one job, without the model and the output format. The same for
+    a direct call and a batch request, so both hit the same cache prefix."""
+    content = job_message(job)
+    if examples:
+        content = f"{examples_block(list(examples))}\n\n{content}"
+    return {
+        "max_tokens": 4_000,
+        "output_config": {"effort": "low"},
+        "system": [
+            {"type": "text", "text": INSTRUCTIONS.format(language=language_name(language))},
+            {
+                "type": "text",
+                "text": profile_block(profile),
+                "cache_control": {"type": "ephemeral"},
+            },
+        ],
+        "messages": [{"role": "user", "content": content}],
+    }
+
+
 def evaluate(
     client: LLMClient,
     profile: Profile,
@@ -154,26 +178,13 @@ def evaluate(
     examples: Sequence[Example] = (),
     operation: str = OPERATION,
 ) -> FitResult:
-    content = job_message(job)
-    if examples:
-        content = f"{examples_block(list(examples))}\n\n{content}"
     return client.structured(
         FitResult,
         operation=operation,
         model=model,
         profile_id=profile_id,
         run_id=run_id,
-        max_tokens=4_000,
-        output_config={"effort": "low"},
-        system=[
-            {"type": "text", "text": INSTRUCTIONS.format(language=language_name(language))},
-            {
-                "type": "text",
-                "text": profile_block(profile),
-                "cache_control": {"type": "ephemeral"},
-            },
-        ],
-        messages=[{"role": "user", "content": content}],
+        **request_params(profile, job, language=language, examples=examples),
     )
 
 
@@ -248,6 +259,109 @@ def _corpus(s: Session, now: datetime, include: set[int]) -> list[list[str]]:
     return [tokens(title) + tokens(description) for title, description in rows]
 
 
+@dataclass(frozen=True)
+class Item:
+    match_id: int
+    job: Job
+    examples: list[Example]
+
+
+@dataclass
+class Prepared:
+    """A profile's jobs chosen for scoring in this run, with their few-shot examples."""
+
+    profile_id: int
+    profile: Profile
+    items: list[Item]
+    summary: ScoringSummary
+
+
+def prepare(
+    engine: Engine,
+    profile_id: int,
+    *,
+    top_n: int,
+    now: datetime,
+    cutoff: RelevanceCutoff | None = None,
+) -> Prepared:
+    profile, chosen, pending, skipped = _select(engine, profile_id, now, top_n, cutoff)
+    with session(engine, commit=False) as s:
+        decisions = load_examples(s, profile_id)
+    return Prepared(
+        profile_id,
+        profile,
+        [Item(match_id, job, similar(decisions, job)) for match_id, job in chosen],
+        ScoringSummary(profile=profile.name, pending=pending, skipped=skipped),
+    )
+
+
+def store(engine: Engine, match_id: int, fit: FitResult, model: str) -> None:
+    """Writes a score in its own short transaction."""
+    with session(engine) as s:
+        m = s.get_one(MatchDB, match_id)
+        m.score = fit.score
+        m.strengths = fit.strengths
+        m.gaps = fit.gaps
+        m.dealbreakers = fit.dealbreakers
+        m.summary = fit.summary
+        m.model = model
+        m.attempts += 1
+        m.status = MatchStatus.NEW
+
+
+def fail(engine: Engine, summary: ScoringSummary, item: Item, error: Exception) -> None:
+    """Uses one attempt; the match stays pending for the next run."""
+    log.warning("scoring failed for %s: %s", item.job.title, error)
+    summary.failures.append(f"{item.job.title}: {type(error).__name__}: {error}")
+    with session(engine) as s:
+        s.get_one(MatchDB, item.match_id).attempts += 1
+
+
+def score_items(
+    engine: Engine,
+    client: LLMClient,
+    prepared: Prepared,
+    items: Sequence[Item],
+    *,
+    model: str,
+    language: str,
+    run_id: int | None = None,
+    progress: Progress | None = None,
+) -> None:
+    """Scores the items one call at a time, updating `prepared.summary`.
+
+    Each job is stored in a short transaction after the call, so the SQLite write lock is
+    not held during network calls. A failure on one job does not stop the others: the
+    match stays pending and is retried in the next run, up to MAX_ATTEMPTS. The cost cap
+    stops the loop (`summary.interrupted`); account errors (key, balance) are raised.
+    """
+    summary = prepared.summary
+    for i, item in enumerate(items, 1):
+        if progress is not None:
+            progress("progress.score", {"profile": prepared.profile.name, "i": i, "n": len(items)})
+        try:
+            fit = evaluate(
+                client,
+                prepared.profile,
+                item.job,
+                model=model,
+                language=language,
+                profile_id=prepared.profile_id,
+                run_id=run_id,
+                examples=item.examples,
+            )
+        except CostCapReached as e:
+            summary.interrupted = str(e)
+            break
+        except (InvalidResponse, anthropic.APIError, ValueError) as e:
+            if is_fatal(e):
+                raise
+            fail(engine, summary, item, e)
+            continue
+        store(engine, item.match_id, fit, model)
+        summary.scored += 1
+
+
 def score_pending(
     engine: Engine,
     client: LLMClient,
@@ -261,54 +375,16 @@ def score_pending(
     cutoff: RelevanceCutoff | None = None,
     progress: Progress | None = None,
 ) -> ScoringSummary:
-    """Scores the profile's best pending jobs with the LLM.
-
-    Each job is stored in a short transaction after the call, so the SQLite write lock is
-    not held during network calls. A failure on one job does not stop the others: the
-    match stays pending and is retried in the next run, up to MAX_ATTEMPTS. Account
-    errors (key, balance) or the cost cap stop everything.
-    """
-    profile, chosen, pending, skipped = _select(engine, profile_id, now, top_n, cutoff)
-    summary = ScoringSummary(profile=profile.name, pending=pending, skipped=skipped)
-    with session(engine, commit=False) as s:
-        decisions = load_examples(s, profile_id)
-
-    for i, (match_id, job) in enumerate(chosen, 1):
-        if progress is not None:
-            progress("progress.score", {"profile": profile.name, "i": i, "n": len(chosen)})
-        try:
-            fit = evaluate(
-                client,
-                profile,
-                job,
-                model=model,
-                language=language,
-                profile_id=profile_id,
-                run_id=run_id,
-                examples=similar(decisions, job),
-            )
-        except CostCapReached as e:
-            summary.interrupted = str(e)
-            break
-        except (InvalidResponse, anthropic.APIError, ValueError) as e:
-            if is_fatal(e):
-                raise
-            log.warning("scoring failed for %s: %s", job.title, e)
-            summary.failures.append(f"{job.title}: {type(e).__name__}: {e}")
-            with session(engine) as s:
-                s.get_one(MatchDB, match_id).attempts += 1
-            continue
-
-        with session(engine) as s:
-            m = s.get_one(MatchDB, match_id)
-            m.score = fit.score
-            m.strengths = fit.strengths
-            m.gaps = fit.gaps
-            m.dealbreakers = fit.dealbreakers
-            m.summary = fit.summary
-            m.model = model
-            m.attempts += 1
-            m.status = MatchStatus.NEW
-        summary.scored += 1
-
-    return summary
+    """Scores the profile's best pending jobs with direct calls (see `score_items`)."""
+    prepared = prepare(engine, profile_id, top_n=top_n, now=now, cutoff=cutoff)
+    score_items(
+        engine,
+        client,
+        prepared,
+        prepared.items,
+        model=model,
+        language=language,
+        run_id=run_id,
+        progress=progress,
+    )
+    return prepared.summary

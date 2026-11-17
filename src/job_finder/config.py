@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     # text. Set both to 0 to send everything.
     relevance_min_title: float = Field(default=0.02, ge=0, le=1)
     relevance_min_text: float = Field(default=0.14, ge=0, le=1)
+    # Scheduled runs score through the Message Batches API (half the price) and wait for
+    # it up to this long; what has not come back by then is scored directly.
+    batch_scheduled: bool = True
+    batch_max_wait_minutes: int = Field(default=30, ge=1)
 
     @property
     def relevance_cutoff(self) -> RelevanceCutoff:

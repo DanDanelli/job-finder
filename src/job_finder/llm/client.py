@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import Engine, func, select
 
 from job_finder.db.models import LLMCostDB
@@ -174,14 +174,52 @@ class LLMClient:
             u.cache_creation_input_tokens or 0,
             response.stop_reason,
         )
-        if response.stop_reason == "refusal":
-            raise InvalidResponse("the model refused the request")
-        if response.stop_reason == "max_tokens":
-            raise InvalidResponse("truncated response (max_tokens)")
+        _check_stop(response.stop_reason)
         output = response.parsed_output
         if output is None:
             raise InvalidResponse(f"no structured output (stop_reason={response.stop_reason})")
         return output
+
+    def from_batch(
+        self,
+        output_format: type[T],
+        message: Any,  # anthropic.types.Message of a succeeded batch result
+        *,
+        operation: str,
+        model: str,
+        profile_id: int | None = None,
+        run_id: int | None = None,
+    ) -> T:
+        """Records the cost of one batch result (discounted) and validates its output
+        like `structured` does. Raises `InvalidResponse`."""
+        self.record(
+            operation, model, message.usage, profile_id=profile_id, run_id=run_id, batch=True
+        )
+        _check_stop(message.stop_reason)
+        text = "".join(b.text for b in message.content if b.type == "text")
+        if not text:
+            raise InvalidResponse(f"no structured output (stop_reason={message.stop_reason})")
+        try:
+            return output_format.model_validate_json(text)
+        except ValidationError as e:
+            raise InvalidResponse(f"output does not match the schema: {e}") from e
+
+
+def _check_stop(stop_reason: str | None) -> None:
+    if stop_reason == "refusal":
+        raise InvalidResponse("the model refused the request")
+    if stop_reason == "max_tokens":
+        raise InvalidResponse("truncated response (max_tokens)")
+
+
+def json_format(output_format: type[BaseModel]) -> dict[str, Any]:
+    """`output_config.format` for a model, built as `messages.parse` builds it. For
+    requests that cannot use `parse`, such as batch requests."""
+    from anthropic import transform_schema
+    from pydantic import TypeAdapter
+
+    schema = transform_schema(TypeAdapter(output_format).json_schema())
+    return {"type": "json_schema", "schema": schema}
 
 
 def make_client(engine: Engine) -> LLMClient:

@@ -13,8 +13,9 @@ from job_finder.connectors.base import Connector
 from job_finder.db import repo
 from job_finder.db.session import session
 from job_finder.i18n import t
+from job_finder.llm.batch import score_batch
 from job_finder.llm.client import LLMClient, is_fatal, make_client
-from job_finder.llm.scorer import ScoringSummary, score_pending
+from job_finder.llm.scorer import ScoringSummary, prepare, score_items, score_pending
 from job_finder.pipeline.run import ProfileSummary, Progress, RunSummary, execute_run, no_progress
 
 log = logging.getLogger(__name__)
@@ -102,26 +103,88 @@ def full_run(
             return report
         client = make_client(engine)
 
+    try:
+        if kind == "scheduled" and settings.batch_scheduled:
+            _score_batched(engine, settings, client, report, now, run.run_id, progress)
+        else:
+            _score_direct(engine, settings, client, report, now, run.run_id, progress)
+    except Exception as e:
+        if not is_fatal(e):
+            raise
+        log.error("scoring stopped: %s", e)
+        report.warnings.append(t(lang, "warn.claude_down", error=f"{type(e).__name__}: {e}"))
+    return report
+
+
+def _score_direct(
+    engine: Engine,
+    settings: Settings,
+    client: LLMClient,
+    report: Report,
+    now: datetime,
+    run_id: int | None,
+    progress: Progress,
+) -> None:
     for pr in report.profiles:
-        try:
-            pr.scoring = score_pending(
-                engine,
-                client,
-                pr.profile_id,
-                model=settings.scoring_model,
-                language=lang,
-                top_n=settings.prerank_top_n,
-                cutoff=settings.relevance_cutoff,
-                now=now,
-                run_id=run.run_id,
-                progress=progress,
-            )
-        except Exception as e:
-            if not is_fatal(e):
-                raise
-            log.error("scoring stopped: %s", e)
-            report.warnings.append(t(lang, "warn.claude_down", error=f"{type(e).__name__}: {e}"))
-            break
+        pr.scoring = score_pending(
+            engine,
+            client,
+            pr.profile_id,
+            model=settings.scoring_model,
+            language=settings.language,
+            top_n=settings.prerank_top_n,
+            cutoff=settings.relevance_cutoff,
+            now=now,
+            run_id=run_id,
+            progress=progress,
+        )
         if pr.scoring.interrupted:
             break
-    return report
+
+
+def _score_batched(
+    engine: Engine,
+    settings: Settings,
+    client: LLMClient,
+    report: Report,
+    now: datetime,
+    run_id: int | None,
+    progress: Progress,
+) -> None:
+    """One batch for every profile; what it does not answer is scored directly."""
+    prepared = []
+    for pr in report.profiles:
+        p = prepare(
+            engine,
+            pr.profile_id,
+            top_n=settings.prerank_top_n,
+            now=now,
+            cutoff=settings.relevance_cutoff,
+        )
+        pr.scoring = p.summary
+        prepared.append(p)
+    leftovers = score_batch(
+        engine,
+        client,
+        prepared,
+        model=settings.scoring_model,
+        language=settings.language,
+        max_wait_s=settings.batch_max_wait_minutes * 60,
+        run_id=run_id,
+        progress=progress,
+    )
+    for p in prepared:
+        if p.summary.interrupted:
+            break
+        score_items(
+            engine,
+            client,
+            p,
+            leftovers.get(p.profile_id, []),
+            model=settings.scoring_model,
+            language=settings.language,
+            run_id=run_id,
+            progress=progress,
+        )
+        if p.summary.interrupted:
+            break

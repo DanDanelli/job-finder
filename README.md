@@ -16,7 +16,9 @@ on a Raspberry Pi.
    normalizes and deduplicates them, applies the profile's hard filters and
    ranks the rest with BM25.
 3. The best candidates are scored by Claude (fit 0-100, strengths, gaps,
-   dealbreakers).
+   dealbreakers). Scheduled runs send them in one batch (half the price) and
+   wait for it up to `JOBFINDER_BATCH_MAX_WAIT_MINUTES` (30); what has not come
+   back by then is scored directly.
 4. The Telegram bot sends the digest at the scheduled times, with
    👍 Save / 👎 Dismiss buttons. `/evaluate <link>` scores a single job you found
    elsewhere.
