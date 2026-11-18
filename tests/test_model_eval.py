@@ -262,7 +262,7 @@ def test_cli_shows_the_estimate_and_asks_before_spending(cli_engine: Any) -> Non
     engine, holder = cli_engine
     label(engine)
 
-    r = CliRunner().invoke(cli_app, ["eval", "-p", "daniel"], input="n\n")
+    r = CliRunner().invoke(cli_app, ["eval", "-p", "alice"], input="n\n")
 
     assert r.exit_code == 1
     assert "4 labeled jobs (2 saved) x 2 models" in r.output
@@ -274,7 +274,7 @@ def test_cli_runs_and_prints_the_comparison(cli_engine: Any) -> None:
     engine, holder = cli_engine
     label(engine)
 
-    r = CliRunner().invoke(cli_app, ["eval", "-p", "daniel", "--yes"])
+    r = CliRunner().invoke(cli_app, ["eval", "-p", "alice", "--yes"])
 
     assert r.exit_code == 0, r.output
     assert len(holder["client"].anthropic.messages.calls) == 8
@@ -285,6 +285,6 @@ def test_cli_runs_and_prints_the_comparison(cli_engine: Any) -> None:
 def test_cli_refuses_a_profile_without_both_labels(cli_engine: Any) -> None:
     engine, _ = cli_engine
     prepare(engine, JOBS)
-    r = CliRunner().invoke(cli_app, ["eval", "-p", "daniel", "--yes"])
+    r = CliRunner().invoke(cli_app, ["eval", "-p", "alice", "--yes"])
     assert r.exit_code != 0
     assert "needs both saved and dismissed" in r.output

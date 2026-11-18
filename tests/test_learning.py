@@ -48,8 +48,8 @@ def proposing(*rules: str) -> Any:
 
 
 def test_propose_stores_a_draft_and_approval_moves_it_into_use(engine: Engine) -> None:
-    pid = add_profile(engine, "daniel")
-    decide(engine, "daniel", 6, saved=2, note="consultancy again")
+    pid = add_profile(engine, "alice")
+    decide(engine, "alice", 6, saved=2, note="consultancy again")
     c = fake_client(engine, proposing("Dismisses consultancies", " Dismisses  consultancies ", ""))
 
     draft = learner.propose(engine, c, pid, model="m", language="en", now=datetime.now(UTC))
@@ -74,8 +74,8 @@ def test_propose_stores_a_draft_and_approval_moves_it_into_use(engine: Engine) -
 
 
 def test_applied_jobs_count_as_liked(engine: Engine) -> None:
-    pid = add_profile(engine, "daniel")
-    decide(engine, "daniel", 4, saved=2)
+    pid = add_profile(engine, "alice")
+    decide(engine, "alice", 4, saved=2)
     with session(engine) as s:
         first = s.scalars(
             select(MatchDB).where(MatchDB.status == MatchStatus.SAVED).order_by(MatchDB.id)
@@ -91,8 +91,8 @@ def test_applied_jobs_count_as_liked(engine: Engine) -> None:
 def test_the_latest_note_is_the_one_claude_sees(engine: Engine) -> None:
     from job_finder.db import repo
 
-    pid = add_profile(engine, "daniel")
-    decide(engine, "daniel", 5, note="first thought")
+    pid = add_profile(engine, "alice")
+    decide(engine, "alice", 5, note="first thought")
     with session(engine) as s:
         m = s.scalars(select(MatchDB).where(MatchDB.profile_id == pid)).first()
         assert m is not None
@@ -105,8 +105,8 @@ def test_the_latest_note_is_the_one_claude_sees(engine: Engine) -> None:
 
 
 def test_same_rules_as_in_use_leave_no_draft(engine: Engine) -> None:
-    pid = add_profile(engine, "daniel")
-    decide(engine, "daniel", 5)
+    pid = add_profile(engine, "alice")
+    decide(engine, "alice", 5)
     learner.approve(engine, pid, ["Dismisses consultancies"])
     c = fake_client(engine, proposing("Dismisses consultancies"))
     assert learner.propose(engine, c, pid, model="m", language="en", now=NOW) is None
@@ -139,10 +139,10 @@ class Sent:
 def test_scheduler_proposes_for_due_profiles_and_tells_them(engine: Engine, db_url: str) -> None:
     import asyncio
 
-    pid = add_profile(engine, "daniel")
-    add_profile(engine, "partner")
-    decide(engine, "daniel", 5)
-    decide(engine, "partner", 2)  # too few
+    pid = add_profile(engine, "alice")
+    add_profile(engine, "bob")
+    decide(engine, "alice", 5)
+    decide(engine, "bob", 2)  # too few
     with session(engine) as s:
         s.get_one(ProfileDB, pid).telegram_chat_id = 42
     sent = Sent()
@@ -150,7 +150,7 @@ def test_scheduler_proposes_for_due_profiles_and_tells_them(engine: Engine, db_u
     scheduler = Scheduler(engine, settings, sent)
     c = fake_client(engine, proposing("Dismisses consultancies"))
 
-    assert asyncio.run(scheduler.learn_due(c)) == ["daniel"]
+    assert asyncio.run(scheduler.learn_due(c)) == ["alice"]
     assert len(sent.messages) == 1
     chat, text = sent.messages[0]
     assert chat == 42 and "1 rules" in text and text.endswith("https://pi.example:8443/learned")
@@ -188,14 +188,14 @@ def test_site_suggest_review_and_approve(
     engine: Engine, site: tuple[TestClient, list[Any]]
 ) -> None:
     client, clients = site
-    pid = add_profile(engine, "daniel")
+    pid = add_profile(engine, "alice")
     login(client)
     page = client.get("/learned").text
     assert "Save or dismiss at least 5 jobs first" in page
     assert client.post("/learned/suggest").status_code == 303
     assert clients == []  # not enough decisions: Claude is not called
 
-    decide(engine, "daniel", 5)
+    decide(engine, "alice", 5)
     assert "0 rules in use" in client.get("/profile").text
     client.post("/learned/suggest")
     page = _wait(client, "is reading your decisions")
@@ -213,7 +213,7 @@ def test_site_suggest_review_and_approve(
 
 def test_site_discard_keeps_the_rules_in_use(engine: Engine, site: tuple[TestClient, Any]) -> None:
     client, _ = site
-    pid = add_profile(engine, "daniel")
+    pid = add_profile(engine, "alice")
     learner.approve(engine, pid, ["Old rule"])
     with session(engine) as s:
         s.get_one(ProfileDB, pid).rules_draft = ["New rule"]
@@ -226,10 +226,10 @@ def test_site_discard_keeps_the_rules_in_use(engine: Engine, site: tuple[TestCli
 
 def test_rules_are_per_profile(engine: Engine, site: tuple[TestClient, Any]) -> None:
     client, _ = site
-    add_profile(engine, "daniel")
-    other = add_profile(engine, "partner")
+    add_profile(engine, "alice")
+    other = add_profile(engine, "bob")
     learner.approve(engine, other, ["Her rule"])
-    login(client, "daniel", PASSWORD)
+    login(client, "alice", PASSWORD)
     assert "Her rule" not in client.get("/learned").text
     client.post("/learned", data={"rules": "Mine"})
     assert learner.state(engine, other).rules == ["Her rule"]

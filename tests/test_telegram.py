@@ -32,8 +32,8 @@ from job_finder.web.app import create_app
 
 NOW = datetime(2026, 11, 15, 12, tzinfo=UTC)
 LISBON = ZoneInfo("Europe/Lisbon")
-CHAT_DANIEL = 111
-CHAT_PARTNER = 222
+CHAT_ALICE = 111
+CHAT_BOB = 222
 NO_NEW_JOBS = "No new jobs since the last digest."
 
 
@@ -75,13 +75,13 @@ class Source:
 
 
 def prepare(engine: Engine, scores: dict[str, int]) -> dict[str, int]:
-    """Profiles daniel and partner; one job per title, already scored for daniel."""
+    """Profiles alice and bob; one job per title, already scored for alice."""
     with session(engine) as s:
-        repo.save_profile(s, Profile(name="daniel", telegram_chat_id=CHAT_DANIEL))
-        repo.save_profile(s, Profile(name="partner", telegram_chat_id=CHAT_PARTNER))
+        repo.save_profile(s, Profile(name="alice", telegram_chat_id=CHAT_ALICE))
+        repo.save_profile(s, Profile(name="bob", telegram_chat_id=CHAT_BOB))
     jobs = [raw(str(i), title) for i, title in enumerate(scores)]
     with session(engine) as s:
-        execute_run(s, engine, [Source(jobs)], repo.list_profiles(s, ["daniel"]), NOW)
+        execute_run(s, engine, [Source(jobs)], repo.list_profiles(s, ["alice"]), NOW)
     ids = {}
     with session(engine) as s:
         for m in s.scalars(select(MatchDB)):
@@ -138,8 +138,8 @@ def test_run_times_configurable_by_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_digest_selects_sorts_and_cuts(engine: Engine) -> None:
     prepare(engine, {"A": 90, "B": 75, "C": 40, "D": 65})
-    d = build_digest(engine, profile_id(engine, "daniel"), min_score=60, maximum=2)
-    assert d.chat_id == CHAT_DANIEL
+    d = build_digest(engine, profile_id(engine, "alice"), min_score=60, maximum=2)
+    assert d.chat_id == CHAT_ALICE
     assert (d.new, d.above_minimum) == (4, 3)
     assert [i.title for i in d.items] == ["A", "B"]  # D (65) waits for the next one
     assert len(d.below_minimum) == 1  # C
@@ -152,7 +152,7 @@ def test_digest_selects_sorts_and_cuts(engine: Engine) -> None:
 
 def test_format_job_escapes_html_and_credits_the_source(engine: Engine) -> None:
     prepare(engine, {"Cloud <Architect>": 88})
-    item = build_digest(engine, profile_id(engine, "daniel"), min_score=0, maximum=5).items[0]
+    item = build_digest(engine, profile_id(engine, "alice"), min_score=0, maximum=5).items[0]
     assert format_job(item, "en") == (
         "<b>88</b> · <b>Cloud &lt;Architect&gt;</b>\n"
         "Acme &amp; Co · Remote · Europe · EUR 60k-80k/year\n"
@@ -172,7 +172,7 @@ def test_empty_digest() -> None:
 
 def test_send_digest_marks_notified_and_does_not_repeat(engine: Engine) -> None:
     ids = prepare(engine, {"A": 90, "B": 30})
-    pid = profile_id(engine, "daniel")
+    pid = profile_id(engine, "alice")
     sender = FakeSender()
 
     n = asyncio.run(
@@ -190,7 +190,7 @@ def test_send_digest_marks_notified_and_does_not_repeat(engine: Engine) -> None:
 
     assert n == 1
     header, job, warnings = sender.messages
-    assert header[0] == CHAT_DANIEL
+    assert header[0] == CHAT_ALICE
     assert "2 new jobs" in header[1]
     assert [b.callback for b in job[2][:2]] == [f"fb:s:{ids['A']}", f"fb:d:{ids['A']}"]
     assert job[2][2].url == "https://remotive.com/0"
@@ -206,7 +206,7 @@ def test_send_digest_marks_notified_and_does_not_repeat(engine: Engine) -> None:
 
 def test_failed_send_does_not_mark_the_job(engine: Engine) -> None:
     prepare(engine, {"A": 90, "B": 80})
-    pid = profile_id(engine, "daniel")
+    pid = profile_id(engine, "alice")
     with pytest.raises(ConnectionError):
         asyncio.run(
             send_digest(
@@ -238,15 +238,15 @@ def test_profile_without_chat_sends_nothing(engine: Engine) -> None:
 
 def test_allowlist(engine: Engine) -> None:
     prepare(engine, {"A": 90})
-    assert actions.profile_for_chat(engine, CHAT_DANIEL).name == "daniel"  # type: ignore[union-attr]
+    assert actions.profile_for_chat(engine, CHAT_ALICE).name == "alice"  # type: ignore[union-attr]
     assert actions.profile_for_chat(engine, 999) is None
 
 
 def test_feedback_updates_status_and_is_recorded(engine: Engine) -> None:
     ids = prepare(engine, {"A": 90})
-    r = actions.record_feedback(engine, CHAT_DANIEL, f"fb:s:{ids['A']}")
+    r = actions.record_feedback(engine, CHAT_ALICE, f"fb:s:{ids['A']}")
     assert r is not None and r.status == MatchStatus.SAVED
-    r = actions.record_feedback(engine, CHAT_DANIEL, f"fb:d:{ids['A']}")  # changed their mind
+    r = actions.record_feedback(engine, CHAT_ALICE, f"fb:d:{ids['A']}")  # changed their mind
     assert r is not None and r.status == MatchStatus.DISMISSED
     with session(engine) as s:
         assert s.get_one(MatchDB, ids["A"]).status == MatchStatus.DISMISSED
@@ -259,12 +259,12 @@ def test_feedback_updates_status_and_is_recorded(engine: Engine) -> None:
 @pytest.mark.parametrize("data", ["fb:x:1", "fb:s:abc", "junk", "fb:s:99999"])
 def test_invalid_feedback(engine: Engine, data: str) -> None:
     prepare(engine, {"A": 90})
-    assert actions.record_feedback(engine, CHAT_DANIEL, data) is None
+    assert actions.record_feedback(engine, CHAT_ALICE, data) is None
 
 
 def test_feedback_from_another_profile_is_rejected(engine: Engine) -> None:
-    ids = prepare(engine, {"A": 90})  # daniel's match
-    assert actions.record_feedback(engine, CHAT_PARTNER, f"fb:s:{ids['A']}") is None
+    ids = prepare(engine, {"A": 90})  # alice's match
+    assert actions.record_feedback(engine, CHAT_BOB, f"fb:s:{ids['A']}") is None
     assert actions.record_feedback(engine, 999, f"fb:s:{ids['A']}") is None
     with session(engine) as s:
         assert s.get_one(MatchDB, ids["A"]).status == MatchStatus.NEW
@@ -276,22 +276,22 @@ def test_reply_to_a_job_message_becomes_its_note(engine: Engine) -> None:
     assert actions.match_in_buttons(buttons) == ids["A"]
     assert actions.match_in_buttons(["other", "fb:s:x"]) is None
 
-    assert actions.record_note(engine, CHAT_DANIEL, ids["A"], "  consultancy  ") == "consultancy"
-    assert actions.record_note(engine, CHAT_PARTNER, ids["A"], "not mine") is None
+    assert actions.record_note(engine, CHAT_ALICE, ids["A"], "  consultancy  ") == "consultancy"
+    assert actions.record_note(engine, CHAT_BOB, ids["A"], "not mine") is None
     with session(engine) as s:
         m = s.get_one(MatchDB, ids["A"])
         assert repo.latest_note(m.feedback) == "consultancy"
         assert m.status == MatchStatus.NEW  # a note alone does not decide
-    assert actions.record_note(engine, CHAT_DANIEL, ids["A"], "   ") == ""
+    assert actions.record_note(engine, CHAT_ALICE, ids["A"], "   ") == ""
     with session(engine) as s:
         assert repo.latest_note(s.get_one(MatchDB, ids["A"]).feedback) is None
 
 
 def test_saved_and_status(engine: Engine) -> None:
     ids = prepare(engine, {"A & B": 90, "C": 70})
-    pid = profile_id(engine, "daniel")
+    pid = profile_id(engine, "alice")
     assert actions.saved_text(engine, pid, "en") == t("en", "saved.none")
-    actions.record_feedback(engine, CHAT_DANIEL, f"fb:s:{ids['A & B']}")
+    actions.record_feedback(engine, CHAT_ALICE, f"fb:s:{ids['A & B']}")
     saved = actions.saved_text(engine, pid, "en")
     assert '<a href="https://remotive.com/0">A &amp; B</a>' in saved
 
@@ -306,16 +306,16 @@ def test_saved_and_status(engine: Engine) -> None:
 
 def test_pause_removes_the_profile_from_scheduled_runs(engine: Engine) -> None:
     prepare(engine, {"A": 90})
-    pid = profile_id(engine, "daniel")
+    pid = profile_id(engine, "alice")
     assert actions.toggle_pause(engine, pid) is True
-    assert actions.profile_for_chat(engine, CHAT_DANIEL).paused  # type: ignore[union-attr]
+    assert actions.profile_for_chat(engine, CHAT_ALICE).paused  # type: ignore[union-attr]
 
     settings = Settings(connectors=[])
     scheduled = full_run(engine, settings, kind="scheduled", now=NOW)
-    assert [p.name for p in scheduled.profiles] == ["partner"]
+    assert [p.name for p in scheduled.profiles] == ["bob"]
     # On demand (/search) the paused profile still runs.
-    manual = full_run(engine, settings, names=["daniel"], now=NOW)
-    assert [p.name for p in manual.profiles] == ["daniel"]
+    manual = full_run(engine, settings, names=["alice"], now=NOW)
+    assert [p.name for p in manual.profiles] == ["alice"]
 
     assert actions.toggle_pause(engine, pid) is False
 
@@ -334,8 +334,8 @@ def test_scheduler_runs_and_sends_each_profiles_digest(engine: Engine) -> None:
     by_chat: dict[int, list[str]] = {}
     for chat, text, _ in sender.messages:
         by_chat.setdefault(chat, []).append(text)
-    assert any("<b>A</b>" in text for text in by_chat[CHAT_DANIEL])
-    assert by_chat[CHAT_PARTNER][0] == NO_NEW_JOBS
+    assert any("<b>A</b>" in text for text in by_chat[CHAT_ALICE])
+    assert by_chat[CHAT_BOB][0] == NO_NEW_JOBS
     # Without a Claude key, the warning goes at the end for both.
     assert all("ANTHROPIC_API_KEY" in texts[-1] for texts in by_chat.values())
 
@@ -399,7 +399,7 @@ def test_bot_turns_a_reply_to_a_job_into_a_note(engine: Engine) -> None:
     def update(text: str, replied: Any) -> Any:
         message = SimpleNamespace(text=text, reply_to_message=replied, reply_text=reply_text)
         return SimpleNamespace(
-            effective_chat=SimpleNamespace(id=CHAT_DANIEL), effective_message=message
+            effective_chat=SimpleNamespace(id=CHAT_ALICE), effective_message=message
         )
 
     bot = SimpleNamespace(is_bot=True)

@@ -85,7 +85,7 @@ def client(engine: Engine, db_url: str) -> Iterator[TestClient]:
         yield c
 
 
-def login(client: TestClient, name: str = "daniel", password: str = PASSWORD) -> Any:
+def login(client: TestClient, name: str = "alice", password: str = PASSWORD) -> Any:
     return client.post("/login", data={"username": name, "password": password})
 
 
@@ -116,9 +116,9 @@ def test_pages_need_a_session(client: TestClient) -> None:
 
 
 def test_login_and_logout(engine: Engine, client: TestClient) -> None:
-    add_profile(engine, "daniel")
+    add_profile(engine, "alice")
 
-    r = login(client, "Daniel ")  # case and spaces do not matter
+    r = login(client, "Alice ")  # case and spaces do not matter
     assert r.status_code == 303 and r.headers["location"] == "/jobs"
     cookie = r.headers["set-cookie"]
     assert "HttpOnly" in cookie and "SameSite=lax" in cookie
@@ -144,7 +144,7 @@ def test_login_and_logout(engine: Engine, client: TestClient) -> None:
 def test_cookie_is_secure_over_https(
     engine: Engine, db_url: str, base_url: str, headers: dict[str, str], secure: bool
 ) -> None:
-    add_profile(engine, "daniel")
+    add_profile(engine, "alice")
     app = create_app(Settings(database_url=db_url, schedule_enabled=False))
     with TestClient(app, base_url=base_url, headers=headers, follow_redirects=False) as c:
         r = login(c)
@@ -152,11 +152,9 @@ def test_cookie_is_secure_over_https(
         assert ("Secure" in r.headers["set-cookie"]) is secure
 
 
-@pytest.mark.parametrize(
-    ("name", "password"), [("daniel", "wrong password!"), ("nobody", PASSWORD)]
-)
+@pytest.mark.parametrize(("name", "password"), [("alice", "wrong password!"), ("nobody", PASSWORD)])
 def test_bad_login(engine: Engine, client: TestClient, name: str, password: str) -> None:
-    add_profile(engine, "daniel")
+    add_profile(engine, "alice")
     r = login(client, name, password)
     assert r.status_code == 401
     assert "Wrong username or password" in r.text
@@ -164,12 +162,12 @@ def test_bad_login(engine: Engine, client: TestClient, name: str, password: str)
 
 
 def test_profile_without_password_cannot_sign_in(engine: Engine, client: TestClient) -> None:
-    add_profile(engine, "daniel", password=None)
+    add_profile(engine, "alice", password=None)
     assert login(client).status_code == 401
 
 
 def test_repeated_failures_lock_the_username(engine: Engine, client: TestClient) -> None:
-    add_profile(engine, "daniel")
+    add_profile(engine, "alice")
     for _ in range(auth.LoginThrottle.MAX_FAILURES):
         assert login(client, password="wrong password!").status_code == 401
     r = login(client)  # right password, but locked
@@ -186,7 +184,7 @@ def test_throttle_window_expires() -> None:
 
 
 def test_expired_session_is_refused(engine: Engine, client: TestClient) -> None:
-    add_profile(engine, "daniel")
+    add_profile(engine, "alice")
     login(client)
     with session(engine) as s:
         s.scalars(select(SessionDB)).one().expires_at = NOW - timedelta(minutes=1)
@@ -194,16 +192,16 @@ def test_expired_session_is_refused(engine: Engine, client: TestClient) -> None:
 
 
 def test_cross_origin_posts_are_refused(engine: Engine, client: TestClient) -> None:
-    add_profile(engine, "daniel")
+    add_profile(engine, "alice")
     r = client.post(
         "/login",
-        data={"username": "daniel", "password": PASSWORD},
+        data={"username": "alice", "password": PASSWORD},
         headers={"Origin": "https://evil.example"},
     )
     assert r.status_code == 403
     same = client.post(
         "/login",
-        data={"username": "daniel", "password": PASSWORD},
+        data={"username": "alice", "password": PASSWORD},
         headers={"Origin": "http://testserver"},
     )
     assert same.status_code == 303
@@ -223,8 +221,8 @@ def test_cross_origin_posts_are_refused(engine: Engine, client: TestClient) -> N
 def test_fetch_metadata(
     engine: Engine, client: TestClient, headers: dict[str, str], status: int
 ) -> None:
-    add_profile(engine, "daniel")
-    r = client.post("/login", data={"username": "daniel", "password": PASSWORD}, headers=headers)
+    add_profile(engine, "alice")
+    r = client.post("/login", data={"username": "alice", "password": PASSWORD}, headers=headers)
     assert r.status_code == status
 
 
@@ -234,10 +232,10 @@ def test_pages_do_not_make_browsers_send_a_null_origin(client: TestClient) -> No
 
 
 def test_proxy_forwarded_host_counts_as_same_origin(engine: Engine, client: TestClient) -> None:
-    add_profile(engine, "daniel")
+    add_profile(engine, "alice")
     r = client.post(
         "/login",
-        data={"username": "daniel", "password": PASSWORD},
+        data={"username": "alice", "password": PASSWORD},
         headers={
             "Origin": "https://pi.tailnet.ts.net:8443",
             "X-Forwarded-Host": "pi.tailnet.ts.net:8443",
@@ -250,10 +248,10 @@ def test_proxy_forwarded_host_counts_as_same_origin(engine: Engine, client: Test
 
 
 def test_jobs_page_lists_only_your_jobs_with_credits(engine: Engine, client: TestClient) -> None:
-    add_profile(engine, "daniel")
-    add_profile(engine, "partner")
-    add_matches(engine, "daniel", [raw("1", "Cloud Architect <AWS>")])
-    add_matches(engine, "partner", [raw("2", "Brand Manager")])
+    add_profile(engine, "alice")
+    add_profile(engine, "bob")
+    add_matches(engine, "alice", [raw("1", "Cloud Architect <AWS>")])
+    add_matches(engine, "bob", [raw("2", "Brand Manager")])
 
     login(client)
     page = client.get("/jobs").text
@@ -264,8 +262,8 @@ def test_jobs_page_lists_only_your_jobs_with_credits(engine: Engine, client: Tes
 
 
 def test_save_dismiss_restore(engine: Engine, client: TestClient) -> None:
-    add_profile(engine, "daniel")
-    (match_id,) = add_matches(engine, "daniel", [raw("1", "Cloud Architect")])
+    add_profile(engine, "alice")
+    (match_id,) = add_matches(engine, "alice", [raw("1", "Cloud Architect")])
     login(client)
 
     r = client.post(f"/matches/{match_id}", data={"action": "save", "back": "tab=new"})
@@ -282,8 +280,8 @@ def test_save_dismiss_restore(engine: Engine, client: TestClient) -> None:
 
 
 def test_applied_leaves_saved_and_can_go_back(engine: Engine, client: TestClient) -> None:
-    add_profile(engine, "daniel")
-    (match_id,) = add_matches(engine, "daniel", [raw("1", "Cloud Architect")])
+    add_profile(engine, "alice")
+    (match_id,) = add_matches(engine, "alice", [raw("1", "Cloud Architect")])
     login(client)
     client.post(f"/matches/{match_id}", data={"action": "save"})
     assert 'value="apply"' in client.get("/jobs?tab=saved").text
@@ -304,9 +302,9 @@ def test_applied_leaves_saved_and_can_go_back(engine: Engine, client: TestClient
 def test_old_dismissals_leave_the_site_but_not_learning(engine: Engine, client: TestClient) -> None:
     from job_finder.llm import learner
 
-    pid = add_profile(engine, "daniel")
+    pid = add_profile(engine, "alice")
     old, recent = add_matches(
-        engine, "daniel", [raw("1", "Old Architect"), raw("2", "Recent Architect")]
+        engine, "alice", [raw("1", "Old Architect"), raw("2", "Recent Architect")]
     )
     login(client)
     for match_id in (old, recent):
@@ -322,8 +320,8 @@ def test_old_dismissals_leave_the_site_but_not_learning(engine: Engine, client: 
 
 
 def test_note_with_a_decision_and_on_its_own(engine: Engine, client: TestClient) -> None:
-    add_profile(engine, "daniel")
-    (match_id,) = add_matches(engine, "daniel", [raw("1", "Cloud Architect")])
+    add_profile(engine, "alice")
+    (match_id,) = add_matches(engine, "alice", [raw("1", "Cloud Architect")])
     login(client)
     assert 'name="note" value=""' in client.get("/jobs").text
 
@@ -363,8 +361,8 @@ def test_note_with_a_decision_and_on_its_own(engine: Engine, client: TestClient)
 
 
 def test_note_is_cut_to_the_limit(engine: Engine, client: TestClient) -> None:
-    add_profile(engine, "daniel")
-    (match_id,) = add_matches(engine, "daniel", [raw("1", "Cloud Architect")])
+    add_profile(engine, "alice")
+    (match_id,) = add_matches(engine, "alice", [raw("1", "Cloud Architect")])
     login(client)
     client.post(f"/matches/{match_id}", data={"action": "save", "note": "x" * 2000})
     with session(engine) as s:
@@ -372,9 +370,9 @@ def test_note_is_cut_to_the_limit(engine: Engine, client: TestClient) -> None:
 
 
 def test_cannot_touch_another_profiles_match(engine: Engine, client: TestClient) -> None:
-    add_profile(engine, "daniel")
-    add_profile(engine, "partner")
-    (theirs,) = add_matches(engine, "partner", [raw("2", "Brand Manager")])
+    add_profile(engine, "alice")
+    add_profile(engine, "bob")
+    (theirs,) = add_matches(engine, "bob", [raw("2", "Brand Manager")])
     login(client)
 
     assert client.post(f"/matches/{theirs}", data={"action": "dismiss"}).status_code == 404
@@ -387,8 +385,8 @@ def test_cannot_touch_another_profiles_match(engine: Engine, client: TestClient)
 
 
 def test_redirect_after_action_stays_on_the_site(engine: Engine, client: TestClient) -> None:
-    add_profile(engine, "daniel")
-    (match_id,) = add_matches(engine, "daniel", [raw("1", "Cloud Architect")])
+    add_profile(engine, "alice")
+    (match_id,) = add_matches(engine, "alice", [raw("1", "Cloud Architect")])
     login(client)
     r = client.post(f"/matches/{match_id}", data={"action": "save", "back": "//evil.example"})
     assert r.headers["location"].startswith("/jobs?")
@@ -397,8 +395,8 @@ def test_redirect_after_action_stays_on_the_site(engine: Engine, client: TestCli
 
 
 def test_quick_filters(engine: Engine, client: TestClient) -> None:
-    add_profile(engine, "daniel")
-    add_matches(engine, "daniel", [raw("1", "Cloud Architect")], score=55)
+    add_profile(engine, "alice")
+    add_matches(engine, "alice", [raw("1", "Cloud Architect")], score=55)
     login(client)
     assert "Cloud Architect" in client.get("/jobs?min_score=50").text
     assert "Cloud Architect" not in client.get("/jobs?min_score=60").text
@@ -432,7 +430,7 @@ def profile_form(**overrides: Any) -> dict[str, Any]:
 
 
 def test_profile_form_saves_everything(engine: Engine, client: TestClient) -> None:
-    pid = add_profile(engine, "daniel")
+    pid = add_profile(engine, "alice")
     login(client)
 
     r = client.post("/profile", data=profile_form())
@@ -469,7 +467,7 @@ def test_profile_form_saves_everything(engine: Engine, client: TestClient) -> No
 
 
 def test_profile_form_errors_keep_what_was_typed(engine: Engine, client: TestClient) -> None:
-    pid = add_profile(engine, "daniel")
+    pid = add_profile(engine, "alice")
     login(client)
 
     r = client.post(
@@ -493,10 +491,10 @@ def test_fields_not_on_the_form_are_kept() -> None:
 
 
 def test_tightening_a_filter_drops_unseen_matches_only(engine: Engine, client: TestClient) -> None:
-    add_profile(engine, "daniel")
+    add_profile(engine, "alice")
     ids = add_matches(
         engine,
-        "daniel",
+        "alice",
         [
             raw("1", "Junior Cloud Engineer"),  # unseen: dropped
             raw("2", "Junior Platform Engineer"),  # saved: kept
@@ -522,7 +520,7 @@ def test_tightening_a_filter_drops_unseen_matches_only(engine: Engine, client: T
 
 
 def test_pausing_from_the_site(engine: Engine, client: TestClient) -> None:
-    pid = add_profile(engine, "daniel")
+    pid = add_profile(engine, "alice")
     login(client)
     client.post("/profile", data=profile_form(paused="on"))
     with session(engine) as s:
@@ -565,20 +563,20 @@ def test_cli_password_from_stdin(engine: Engine, db_url: str, line: str) -> None
 
     from job_finder.cli import app
 
-    add_profile(engine, "daniel", password=None)
+    add_profile(engine, "alice", password=None)
     with session(engine) as s:
-        p = repo.find_profile(s, "daniel")
+        p = repo.find_profile(s, "alice")
         assert p is not None
         s.add(SessionDB(token_hash="x" * 64, profile_id=p.id, expires_at=NOW + timedelta(days=1)))
     result = CliRunner().invoke(
         app,
-        ["profile", "password", "daniel", "--stdin"],
+        ["profile", "password", "alice", "--stdin"],
         input=line,
         env={"JOBFINDER_DATABASE_URL": db_url},
     )
     assert result.exit_code == 0, result.output
     assert PASSWORD not in result.output
-    assert auth.verify_password(PASSWORD, _password_hash(engine, "daniel"))
+    assert auth.verify_password(PASSWORD, _password_hash(engine, "alice"))
     with session(engine) as s:
         assert s.scalars(select(SessionDB)).all() == []  # open sessions signed out
 
@@ -588,16 +586,16 @@ def test_cli_password_prompt_cleans_and_compares(engine: Engine, db_url: str) ->
 
     from job_finder.cli import app
 
-    add_profile(engine, "daniel", password=None)
+    add_profile(engine, "alice", password=None)
     runner = CliRunner()
     env = {"JOBFINDER_DATABASE_URL": db_url}
     pasted_then_typed = f"\x1b[200~{PASSWORD}\x1b[201~\n{PASSWORD}\n"
-    ok = runner.invoke(app, ["profile", "password", "daniel"], input=pasted_then_typed, env=env)
+    ok = runner.invoke(app, ["profile", "password", "alice"], input=pasted_then_typed, env=env)
     assert ok.exit_code == 0, ok.output
-    assert auth.verify_password(PASSWORD, _password_hash(engine, "daniel"))
+    assert auth.verify_password(PASSWORD, _password_hash(engine, "alice"))
 
     bad = runner.invoke(
-        app, ["profile", "password", "daniel"], input=f"{PASSWORD}\nother password\n", env=env
+        app, ["profile", "password", "alice"], input=f"{PASSWORD}\nother password\n", env=env
     )
     assert bad.exit_code != 0 and "differ" in bad.output
     assert "short" not in bad.output
@@ -608,14 +606,14 @@ def test_cli_short_password_from_stdin_is_refused(engine: Engine, db_url: str) -
 
     from job_finder.cli import app
 
-    add_profile(engine, "daniel", password=None)
+    add_profile(engine, "alice", password=None)
     result = CliRunner().invoke(
         app,
-        ["profile", "password", "daniel", "--stdin"],
+        ["profile", "password", "alice", "--stdin"],
         input="short\n",
         env={"JOBFINDER_DATABASE_URL": db_url},
     )
-    assert result.exit_code != 0 and _password_hash(engine, "daniel") is None
+    assert result.exit_code != 0 and _password_hash(engine, "alice") is None
 
 
 # --- sorting ----------------------------------------------------------------------
@@ -628,10 +626,10 @@ def _set_scores(engine: Engine, scores: dict[str, int]) -> None:
 
 
 def test_jobs_can_be_sorted_by_fit_and_date(engine: Engine, client: TestClient) -> None:
-    add_profile(engine, "daniel")
+    add_profile(engine, "alice")
     add_matches(
         engine,
-        "daniel",
+        "alice",
         [
             raw("1", "Old good", posted_at=NOW - timedelta(days=5)),
             raw("2", "New weak", posted_at=NOW - timedelta(hours=2)),
@@ -662,7 +660,7 @@ def test_jobs_can_be_sorted_by_fit_and_date(engine: Engine, client: TestClient) 
 
 
 def test_change_password_signs_out_other_devices(engine: Engine, db_url: str) -> None:
-    add_profile(engine, "daniel")
+    add_profile(engine, "alice")
     settings = Settings(database_url=db_url, schedule_enabled=False, web_secure_cookie=False)
     app = create_app(settings)
     with TestClient(app, follow_redirects=False) as phone, TestClient(app) as laptop:
@@ -673,7 +671,7 @@ def test_change_password_signs_out_other_devices(engine: Engine, db_url: str) ->
         assert r.status_code == 303 and r.headers["location"] == "/account?changed=1"
         assert phone.get("/jobs").status_code == 200  # this device stays in
         assert laptop.get("/jobs", follow_redirects=False).status_code == 303  # signed out
-        assert auth.verify_password(new, _password_hash(engine, "daniel"))
+        assert auth.verify_password(new, _password_hash(engine, "alice"))
 
 
 @pytest.mark.parametrize(
@@ -687,21 +685,21 @@ def test_change_password_signs_out_other_devices(engine: Engine, db_url: str) ->
 def test_change_password_errors(
     engine: Engine, client: TestClient, form: dict[str, str], status: int, message: str
 ) -> None:
-    add_profile(engine, "daniel")
+    add_profile(engine, "alice")
     login(client)
     r = client.post("/account", data=form)
     assert r.status_code == status and message in r.text
-    assert auth.verify_password(PASSWORD, _password_hash(engine, "daniel"))
+    assert auth.verify_password(PASSWORD, _password_hash(engine, "alice"))
 
 
 def test_guessing_the_current_password_is_throttled(engine: Engine, client: TestClient) -> None:
-    add_profile(engine, "daniel")
+    add_profile(engine, "alice")
     login(client)
     for _ in range(auth.LoginThrottle.MAX_FAILURES):
         client.post("/account", data={"current": "nope nope", "new": "x" * 9, "repeat": "x" * 9})
     r = client.post("/account", data={"current": PASSWORD, "new": "y" * 9, "repeat": "y" * 9})
     assert r.status_code == 429
-    assert auth.verify_password(PASSWORD, _password_hash(engine, "daniel"))
+    assert auth.verify_password(PASSWORD, _password_hash(engine, "alice"))
 
 
 # --- CV ---------------------------------------------------------------------------
@@ -756,7 +754,7 @@ def cv_client(engine: Engine, db_url: str, tmp_path: Any) -> Iterator[tuple[Test
         yield c, calls
 
 
-def _profile(engine: Engine, name: str = "daniel") -> Profile:
+def _profile(engine: Engine, name: str = "alice") -> Profile:
     with session(engine, commit=False) as s:
         db = repo.find_profile(s, name)
         assert db is not None
@@ -767,7 +765,7 @@ def test_cv_upload_review_and_save(
     engine: Engine, cv_client: tuple[TestClient, list[int]], tmp_path: Any
 ) -> None:
     client, calls = cv_client
-    pid = add_profile(engine, "daniel")
+    pid = add_profile(engine, "alice")
     login(client)
     r = client.post("/cv/upload", files={"file": ("cv.pdf", PDF, "application/pdf")})
     assert r.status_code == 303
@@ -816,7 +814,7 @@ def test_cv_discard_changes_nothing(
     engine: Engine, cv_client: tuple[TestClient, list[int]], tmp_path: Any
 ) -> None:
     client, _ = cv_client
-    pid = add_profile(engine, "daniel")
+    pid = add_profile(engine, "alice")
     login(client)
     client.post("/cv/upload", files={"file": ("cv.pdf", PDF, "application/pdf")})
     _wait(client, "/cv", "is reading your CV")
@@ -840,7 +838,7 @@ def test_cv_upload_is_checked(
     engine: Engine, cv_client: tuple[TestClient, list[int]], content: bytes, message: str
 ) -> None:
     client, calls = cv_client
-    add_profile(engine, "daniel")
+    add_profile(engine, "alice")
     login(client)
     r = client.post("/cv/upload", files={"file": ("cv.pdf", content, "application/pdf")})
     assert r.status_code == 422 and message in r.text
@@ -851,7 +849,7 @@ def test_cv_extraction_failure_is_shown(engine: Engine, db_url: str, tmp_path: A
     def broken(pdf: Any, profile_id: int) -> Any:
         raise RuntimeError("Claude is down")
 
-    add_profile(engine, "daniel")
+    add_profile(engine, "alice")
     settings = Settings(
         database_url=db_url,
         schedule_enabled=False,
@@ -870,7 +868,7 @@ def test_profile_data_can_be_edited_without_a_cv(
     engine: Engine, cv_client: tuple[TestClient, list[int]]
 ) -> None:
     client, _ = cv_client
-    add_profile(engine, "daniel")
+    add_profile(engine, "alice")
     login(client)
     r = client.post("/cv", data={"summary": "Hand written.", "skills": "SEO | 9", "languages": ""})
     assert r.status_code == 422 and "SEO | 9" in r.text  # weight out of range, kept as typed
@@ -932,7 +930,7 @@ def test_search_now_runs_in_the_background_and_reports(engine: Engine, db_url: s
             return [raw("s1", "Cloud Architect at Slow", source="slowtest")]
 
     base.register("slowtest")(lambda http: Slow())
-    add_profile(engine, "daniel")
+    add_profile(engine, "alice")
     settings = Settings(
         database_url=db_url,
         schedule_enabled=False,
@@ -964,8 +962,8 @@ def test_search_now_runs_in_the_background_and_reports(engine: Engine, db_url: s
 def test_status_shows_cost_shared_and_yours(engine: Engine, client: TestClient) -> None:
     from job_finder.db.models import LLMCostDB
 
-    me = add_profile(engine, "daniel")
-    other = add_profile(engine, "partner")
+    me = add_profile(engine, "alice")
+    other = add_profile(engine, "bob")
     with session(engine) as s:
         for pid, cost in ((me, 0.25), (other, 0.5), (me, 0.25)):
             s.add(LLMCostDB(profile_id=pid, operation="scoring", model="m", cost_usd=cost))
@@ -979,7 +977,7 @@ def test_status_shows_cost_shared_and_yours(engine: Engine, client: TestClient) 
 def test_progress_is_reported(engine: Engine) -> None:
     from job_finder.service import full_run
 
-    add_profile(engine, "daniel")
+    add_profile(engine, "alice")
     steps: list[str] = []
     full_run(
         engine,

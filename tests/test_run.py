@@ -64,7 +64,7 @@ def create_profiles(engine: Engine) -> None:
         repo.save_profile(
             s,
             Profile(
-                name="daniel",
+                name="alice",
                 queries=[Query(term="Cloud Architect"), Query(term="DevOps", active=False)],
                 filters=Filters(remote_from=["PT"]),
             ),
@@ -72,7 +72,7 @@ def create_profiles(engine: Engine) -> None:
         repo.save_profile(
             s,
             Profile(
-                name="partner",
+                name="bob",
                 queries=[Query(term="Brand Marketing"), Query(term="cloud architect")],
                 filters=Filters(remote_from=["BR"], blocked_keywords=["architect"]),
             ),
@@ -116,17 +116,17 @@ def test_full_run(engine: Engine) -> None:
         "Cloud Architect",
     ]
 
-    daniel, partner = summary.profiles
-    assert [j.title for j in daniel.approved] == ["Cloud Architect"]
-    assert daniel.discards == {"location": 1}  # "USA" does not accept residents of PT
-    assert partner.approved == []
-    assert partner.discards == {"location": 2}  # Europe and the US do not accept residents of BR
+    alice, bob = summary.profiles
+    assert [j.title for j in alice.approved] == ["Cloud Architect"]
+    assert alice.discards == {"location": 1}  # "USA" does not accept residents of PT
+    assert bob.approved == []
+    assert bob.discards == {"location": 2}  # Europe and the US do not accept residents of BR
     # The 60-day-old job is not even a candidate.
-    assert daniel.evaluated == 2
+    assert alice.evaluated == 2
 
     with session(engine) as s:
         matches = s.scalars(select(MatchDB)).all()
-        assert [(m.profile.name, m.status) for m in matches] == [("daniel", MatchStatus.PENDING)]
+        assert [(m.profile.name, m.status) for m in matches] == [("alice", MatchStatus.PENDING)]
         run_row = s.scalars(select(RunDB)).one()
         assert (run_row.status, run_row.jobs_new, run_row.matches_new) == ("ok", 3, 1)
         assert run_row.finished_at is not None
@@ -141,7 +141,7 @@ def test_second_run_does_not_duplicate(engine: Engine) -> None:
     assert summary.new == 0
     assert count(engine, JobDB) == 2
     assert count(engine, JobSourceDB) == 2
-    assert count(engine, MatchDB) == 2  # one match per job for daniel, no repeats
+    assert count(engine, MatchDB) == 2  # one match per job for alice, no repeats
     assert summary.profiles[0].evaluated == 0
 
 

@@ -49,7 +49,7 @@ def _job(key: str = "acme|cloud architect|br") -> JobDB:
 
 def test_match_is_unique_per_job_and_profile(engine: Engine) -> None:
     with session(engine) as s:
-        profile = ProfileDB(name="daniel")
+        profile = ProfileDB(name="alice")
         job = _job()
         s.add_all([profile, job])
         s.flush()

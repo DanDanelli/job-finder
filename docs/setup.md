@@ -232,8 +232,7 @@ reached) also show on **Status** and at the end of the digest.
 
 ## Costs
 
-Claude is the only part that costs money. What one installation with two people spent in
-its first days, with the default settings:
+Claude is the only part that costs money. Typical costs with the default settings:
 
 | What | Cost |
 |---|---|

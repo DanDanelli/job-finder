@@ -22,7 +22,7 @@ def test_backup_copies_a_live_database_and_keeps_n_days(
     engine: Engine, db_url: str, tmp_path: Path
 ) -> None:
     with session(engine) as s:
-        repo.save_profile(s, Profile(name="daniel"))
+        repo.save_profile(s, Profile(name="alice"))
     target = tmp_path / "other-disk"
     day = date(2026, 11, 1)
     for i in range(9):
@@ -33,7 +33,7 @@ def test_backup_copies_a_live_database_and_keeps_n_days(
     assert oct(newest.stat().st_mode & 0o777) == "0o600"
     # the copy is a working database with the data, even though the source is in WAL mode
     with sqlite3.connect(newest) as c:
-        assert c.execute("select name from profiles").fetchall() == [("daniel",)]
+        assert c.execute("select name from profiles").fetchall() == [("alice",)]
     assert not list(target.glob("*.partial"))
 
 

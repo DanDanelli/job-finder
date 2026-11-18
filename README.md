@@ -6,8 +6,6 @@ Docker does; built for (and running on) a Raspberry Pi.
 
 **Setting it up:** [docs/setup.md](docs/setup.md), step by step from zero to your first digest.
 
-- Design: [docs/plans/2026-11-15-job-finder-design.md](docs/plans/2026-11-15-job-finder-design.md)
-- Plan: [docs/plans/2026-11-15-job-finder-implementation.md](docs/plans/2026-11-15-job-finder-implementation.md)
 
 ## How it works
 

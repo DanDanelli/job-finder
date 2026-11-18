@@ -23,7 +23,7 @@ def test_country_code_is_uppercase_iso2() -> None:
 
 
 def test_profile_has_usable_defaults() -> None:
-    profile = Profile(name="daniel")
+    profile = Profile(name="alice")
     assert profile.filters == Filters()
     assert profile.filters.max_age_days == 14
     assert profile.queries == []
@@ -31,7 +31,7 @@ def test_profile_has_usable_defaults() -> None:
 
 def test_profile_round_trips_through_json() -> None:
     profile = Profile(
-        name="daniel",
+        name="alice",
         telegram_chat_id=8_000_000_000,
         queries=[Query(term="DevOps Lead", countries=["BR"])],
     )

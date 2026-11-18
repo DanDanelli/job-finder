@@ -86,8 +86,8 @@ def client(
 
 def profiles(engine: Engine, filters: Filters | None = None) -> int:
     with session(engine) as s:
-        p = repo.save_profile(s, Profile(name="daniel", filters=filters or Filters()))
-        repo.save_profile(s, Profile(name="partner"))
+        p = repo.save_profile(s, Profile(name="alice", filters=filters or Filters()))
+        repo.save_profile(s, Profile(name="bob"))
         return p.id
 
 

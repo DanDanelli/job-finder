@@ -225,7 +225,7 @@ def prepare(engine: Engine, jobs: list[RawJob]) -> int:
         repo.save_profile(
             s,
             Profile(
-                name="daniel",
+                name="alice",
                 data=ProfileData(
                     summary="Senior cloud architect",
                     roles=["Cloud Architect"],
@@ -247,7 +247,7 @@ def prepare(engine: Engine, jobs: list[RawJob]) -> int:
 
     with session(engine) as s:
         execute_run(s, engine, [Source()], repo.list_profiles(s), NOW)
-        profile = repo.find_profile(s, "daniel")
+        profile = repo.find_profile(s, "alice")
         assert profile is not None
         return profile.id
 
@@ -563,11 +563,11 @@ def test_cli_import_fills_in_the_profile(tmp_path: Path, monkeypatch: pytest.Mon
     pdf.write_bytes(b"%PDF-1.4 fake")
 
     runner = CliRunner()
-    r = runner.invoke(cli_app, ["profile", "import", str(pdf), "--profile", "partner"])
+    r = runner.invoke(cli_app, ["profile", "import", str(pdf), "--profile", "bob"])
     assert r.exit_code == 0, r.output
 
     with session(engine) as s:
-        db = repo.find_profile(s, "partner")
+        db = repo.find_profile(s, "bob")
         assert db is not None
         profile = repo.profile_from(db)
         assert db.resume_path and Path(db.resume_path).exists()
@@ -578,13 +578,13 @@ def test_cli_import_fills_in_the_profile(tmp_path: Path, monkeypatch: pytest.Mon
     ]
 
     # Export and load back keeps everything; a YAML without `data` keeps the extracted data.
-    exported = runner.invoke(cli_app, ["profile", "export", "partner"])
+    exported = runner.invoke(cli_app, ["profile", "export", "bob"])
     assert exported.exit_code == 0, exported.output
-    yaml_without_data = tmp_path / "partner.yaml"
-    yaml_without_data.write_text("name: partner\nqueries:\n  - term: Brand Manager\n")
+    yaml_without_data = tmp_path / "bob.yaml"
+    yaml_without_data.write_text("name: bob\nqueries:\n  - term: Brand Manager\n")
     assert runner.invoke(cli_app, ["profile", "load", str(yaml_without_data)]).exit_code == 0
     with session(engine) as s:
-        db = repo.find_profile(s, "partner")
+        db = repo.find_profile(s, "bob")
         assert db is not None
         assert repo.profile_from(db).data.roles == ["Brand Manager"]
     assert "Brand architect" in exported.output

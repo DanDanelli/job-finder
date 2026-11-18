@@ -10,3 +10,6 @@ dist/
 # Personal profiles (only the example goes into the repository)
 profiles/*
 !profiles/example.yaml
+
+# Working notes of one installation (design history, decisions, evals); not published
+docs/internal/
