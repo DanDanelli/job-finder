@@ -14,9 +14,12 @@ Because the key travels in the URL, HTTP errors are re-raised without it: run er
 are stored and shown in the digest.
 
 Each run makes a few searches, rotating through the (term, country) pairs of every
-profile, like JSearch.
+profile, like JSearch. A failed search is logged with its term and skipped; the
+connector fails only when every search of the run failed (seen in November 2026:
+HTTP 503 on Brazil, which used to throw away the searches that had worked).
 """
 
+import logging
 from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
@@ -29,6 +32,8 @@ from job_finder.domain import Query, RawJob, Salary
 from job_finder.pipeline.locations import parse_location
 from job_finder.quota import Quota
 from job_finder.text import html_to_text
+
+log = logging.getLogger(__name__)
 
 URL = "https://api.adzuna.com/v1/api/jobs/{country}/search/1"
 # Country -> (Adzuna site, salary currency).
@@ -85,13 +90,22 @@ class Adzuna:
         start = quota.used_this_month()
         n = min(self.settings.adzuna_searches_per_run, len(pairs))
         jobs: dict[str, RawJob] = {}
+        failures: list[RuntimeError] = []
         for i in range(n):
             term, country = pairs[(start + i) % len(pairs)]
             quota.consume()
-            for item in self._search(term, country):
+            try:
+                items = self._search(term, country)
+            except RuntimeError as e:
+                log.warning("%s, search %r skipped", e, term)
+                failures.append(e)
+                continue
+            for item in items:
                 job = self._convert(item, country)
                 if job is not None:
                     jobs.setdefault(job.source_id, job)
+        if failures and len(failures) == n:
+            raise failures[-1]
         return list(jobs.values())
 
     def _search(self, term: str, country: str) -> list[dict[str, Any]]:

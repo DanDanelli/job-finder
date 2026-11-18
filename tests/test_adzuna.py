@@ -97,6 +97,21 @@ def test_errors_do_not_leak_the_key(engine: Engine, status: int) -> None:
     assert e.value.__suppress_context__
 
 
+def test_one_failed_search_keeps_the_others(
+    engine: Engine, caplog: pytest.LogCaptureFixture
+) -> None:
+    with respx.mock() as router:
+        router.get(url__startswith=SEARCH, params={"what": "broken"}).respond(503)
+        router.get(url__startswith=SEARCH).respond(200, json=json.loads(FIXTURE.read_text()))
+        with base.http_client() as http:
+            jobs = Adzuna(http, settings()).search(
+                [Query(term="broken"), Query(term="marketing")], quota(engine)
+            )
+    assert len(jobs) == 2
+    assert "Adzuna: HTTP 503 (br), search 'broken' skipped" in caplog.text
+    assert "key-secret" not in caplog.text
+
+
 def test_network_error_does_not_leak_the_key(engine: Engine) -> None:
     with respx.mock() as router:
         router.get(url__startswith=SEARCH).mock(side_effect=httpx.ConnectError("boom"))
