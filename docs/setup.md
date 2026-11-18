@@ -12,15 +12,15 @@ password and Telegram chat.
 
 | | Required | Notes |
 |---|---|---|
-| A machine that stays on | yes | Anything that runs Docker: a Raspberry Pi 4 or 5 (64-bit OS), a home server, a small VPS. 1 GB of free RAM and a few GB of disk are plenty. |
+| A machine that stays on | yes | Anything that runs Docker, amd64 or arm64: a home server, a small VPS, a single-board computer. 1 GB of free RAM and a few GB of disk are plenty. |
 | Docker with Compose | yes | `docker compose version` should work. |
 | Anthropic API key | yes | Claude reads your CV and scores jobs. Pay as you go; see [Costs](#costs). |
 | Telegram account | yes | For the digest and the bot. |
 | JSearch key (Google for Jobs) | no | Adds jobs from Google for Jobs (LinkedIn, Indeed, company sites...). |
 | Adzuna keys | no | Adds Adzuna's job search, strong in Brazil and ~18 other countries. |
-| Tailscale | no | To reach the site from outside home, with HTTPS. |
+| A reverse proxy with HTTPS | no | Only to reach the site from outside your local network. |
 
-Without the optional keys, jobs come from Remotive, Remote OK, Himalayas and We Work
+Without the optional keys you can still use Remotive, Remote OK, Himalayas and We Work
 Remotely, which are mostly remote jobs.
 
 ## 2. Get the code
@@ -69,6 +69,12 @@ JOBFINDER_TIMEZONE=America/Sao_Paulo        # yours, for the run times
 JOBFINDER_LANGUAGE=en                       # or pt-BR: bot messages and Claude's text
 ```
 
+Choose the sources. Only Remotive runs by default; the keyless ones are:
+
+```bash
+JOBFINDER_CONNECTORS='["remotive","remoteok","himalayas","weworkremotely"]'
+```
+
 Optional, but worth a look:
 
 ```bash
@@ -76,7 +82,7 @@ JOBFINDER_RUN_TIMES=["08:00","18:00"]       # when the scheduled runs happen
 JOBFINDER_DIGEST_MIN_SCORE=70               # minimum fit to reach Telegram
 JOBFINDER_MONTHLY_COST_CAP_USD=5            # Claude stops scoring at this spend
 
-# Optional sources: add them to the list and set their keys
+# Sources with keys: add them to the list and set their keys
 JOBFINDER_CONNECTORS='["remotive","remoteok","himalayas","jsearch","adzuna","weworkremotely"]'
 JOBFINDER_JSEARCH_API_KEY=...
 JOBFINDER_ADZUNA_APP_ID=...
@@ -94,7 +100,7 @@ docker compose ps        # wait for "(healthy)"
 docker compose logs -f   # Ctrl+C to stop following
 ```
 
-The first build takes a few minutes on a Raspberry Pi. The database is created on start,
+The first build takes a few minutes on a small machine. The database is created on start,
 in `data/job_finder.db`.
 
 Only one copy of the app may run with a given bot token: Telegram delivers each message to
@@ -151,25 +157,19 @@ searches and filters, but keeps what was read from the CV if the file has no `da
 docker compose exec job-finder job-finder profile password alex
 ```
 
-The site is at `http://localhost:8000` on the machine itself. From other devices, pick
-one of the two options below. Sign in with the profile name and that password.
+The site is at `http://localhost:8000` on the machine itself. Sign in with the profile
+name and that password. To open it from other devices:
 
-**On your home network.** Add `BIND_ADDRESS=0.0.0.0` to `.env` and run
+**On your local network.** Add `BIND_ADDRESS=0.0.0.0` to `.env` and run
 `docker compose up -d`. The site is then at `http://<machine-ip>:8000`. This is plain HTTP:
 use it only on a network you trust and never forward the port on your router. Docker
-publishes the port past `ufw`, so the firewall will not filter it.
+publishes the port past host firewalls such as `ufw`, so they will not filter it.
 
-**From anywhere, with Tailscale.** Install [Tailscale](https://tailscale.com) on the machine
-and on your phone or laptop, then on the machine:
-
-```bash
-sudo tailscale serve --bg --https=8443 http://127.0.0.1:8000
-```
-
-The site is at `https://<machine>.<tailnet>.ts.net:8443` (the full name is in the Tailscale
-admin console). To give someone else access without adding them to your tailnet, share just
-that machine with them (Machines → ⋯ → Share). Put the address in `.env` as
-`JOBFINDER_SITE_URL` so Telegram messages can link to the site.
+**From anywhere.** Put the site behind a reverse proxy that serves HTTPS and forwards to
+`http://127.0.0.1:8000`, keeping `BIND_ADDRESS` at its default. The proxy should keep the
+`Host` header (or send `X-Forwarded-Host`) and send `X-Forwarded-Proto: https`, so the
+session cookie is marked `Secure`. Put the public address in `.env` as
+`JOBFINDER_SITE_URL`, so Telegram messages can link to the site.
 
 ## 9. Read your CV
 

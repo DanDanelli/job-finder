@@ -1,11 +1,11 @@
 # Job Finder
 
 A personal assistant that reads your CV, collects jobs from several sources,
-ranks them by fit with Claude and sends a daily digest on Telegram. Runs anywhere
-Docker does; built for (and running on) a Raspberry Pi.
+ranks them by fit with Claude and sends a daily digest on Telegram. Several people can
+share one installation, each with their own profile, filters and chat. It runs in a
+single Docker container with SQLite, so a small machine is enough.
 
 **Setting it up:** [docs/setup.md](docs/setup.md), step by step from zero to your first digest.
-
 
 ## How it works
 
@@ -39,6 +39,54 @@ the digest would have shown) and what it cost. It prints an estimate and asks
 before spending; `--limit 5` tries a small sample first. Nothing in your jobs
 changes.
 
+## Running it
+
+Everything runs in one Docker container: the scheduled job collection, the Telegram
+bot and the site. Any machine with Docker works (amd64 or arm64): a home
+server, a small VPS, a single-board computer.
+
+```bash
+git clone https://github.com/DanDanelli/job-finder.git && cd job-finder
+mkdir -p data
+cp .env.example .env        # at least ANTHROPIC_API_KEY and JOBFINDER_TELEGRAM_BOT_TOKEN
+docker compose up -d --build
+```
+
+Then link your Telegram chat, create a profile, set a password and upload your CV:
+[docs/setup.md](docs/setup.md) walks through it.
+
+The database lives in `./data` and migrations run on startup. The app copies the
+database every day at 03:30 (and on start when today's copy is missing), keeping the
+last 7 days (`JOBFINDER_BACKUP_TIME`, `JOBFINDER_BACKUP_KEEP_DAYS`). The copies go to
+`./data/backup` unless `BACKUP_HOST_DIR` in `.env` points to a folder on another disk,
+which is what you want: a copy on the same disk dies with it. `job-finder db backup`
+makes one now. To restore, stop the container and copy a `job_finder-<date>.db` over
+`data/job_finder.db`.
+
+## Configuration
+
+All settings are environment variables with the `JOBFINDER_` prefix, read from
+`.env`; [`.env.example`](.env.example) lists them with their defaults. The ones you
+are most likely to change:
+
+| Variable | Default | What it does |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | | Claude API key (required) |
+| `JOBFINDER_TELEGRAM_BOT_TOKEN` | | Bot token from @BotFather (required for Telegram) |
+| `JOBFINDER_LANGUAGE` | `en` | Bot messages and Claude's text: `en` or `pt-BR` |
+| `JOBFINDER_TIMEZONE` | `America/Sao_Paulo` | Time zone of the scheduled runs |
+| `JOBFINDER_RUN_TIMES` | `["08:00","18:00"]` | When the scheduled runs happen |
+| `JOBFINDER_DIGEST_MIN_SCORE` | `70` | Minimum fit to reach Telegram |
+| `JOBFINDER_MONTHLY_COST_CAP_USD` | `5` | Claude spend cap per month |
+| `JOBFINDER_CONNECTORS` | `["remotive"]` | Which job sources run (see [Sources](#sources-and-their-terms)) |
+| `JOBFINDER_SITE_URL` | | The site's public address, for links in Telegram |
+| `BIND_ADDRESS` | `127.0.0.1` | Read by Docker Compose: where the site's port is published |
+
+Each person is a profile: search terms, hard filters (countries, remote eligibility,
+work modes, contract types, minimum salary, blocked companies and keywords) and free-text
+preferences for Claude. Start from [`profiles/example.yaml`](profiles/example.yaml);
+after that, everything is editable on the site.
+
 ## Development
 
 ```bash
@@ -53,24 +101,7 @@ uv run pytest                # tests
 uv run ruff check . && uv run ruff format --check . && uv run mypy
 ```
 
-## Raspberry Pi (Docker)
-
-```bash
-cp .env.example .env
-docker compose up -d --build
-```
-
-The database lives in the `./data` volume. Migrations run on startup.
-
-The app copies the database every day at 03:30 (and on start when today's copy
-is missing), keeping the last 7 days (`JOBFINDER_BACKUP_TIME`,
-`JOBFINDER_BACKUP_KEEP_DAYS`). The copies go to `./data/backup` unless you set
-`BACKUP_HOST_DIR` in `.env` to a folder on another disk, which is what you want:
-a copy on the same disk dies with it. `job-finder db backup` makes one now. To
-restore, stop the container and copy a `job_finder-<date>.db` over
-`data/job_finder.db`.
-
-## Site
+## The site
 
 Each profile signs in with its own name and password and sees only its own
 data. There is no sign-up: the first password is set from the terminal; after
@@ -79,7 +110,7 @@ are signed out).
 
 ```bash
 docker compose exec job-finder job-finder profile password <name>
-# or, without an interactive terminal (e.g. piped over ssh):
+# or, without an interactive terminal:
 printf '%s\n' "$PASSWORD" | docker compose exec -T job-finder job-finder profile password <name> --stdin
 ```
 
@@ -109,25 +140,25 @@ Pages:
   limits, recent runs with their warnings, and Claude's spend this month
   (total, per use, and yours).
 
-The pages are plain HTML forms; no JavaScript. The container listens only on
-`127.0.0.1:8000` by default. Reach it over Tailscale, which also gives HTTPS (the
-session cookie is `Secure` whenever the request came over HTTPS):
+The pages are plain HTML forms; no JavaScript.
 
-```bash
-sudo tailscale serve --bg --https=8443 http://127.0.0.1:8000
-# https://<machine>.<tailnet>.ts.net:8443
-```
+### Reaching the site
 
-Someone outside your tailnet can get in if you share just that machine with
-them from the Tailscale admin console (Machines → ⋯ → Share); they use the
-full `<machine>.<tailnet>.ts.net` name.
+The container publishes the site on `127.0.0.1:8000` only, so by default it is
+reachable from the machine itself. Two ways to open it to other devices:
 
-To open it on your home network without Tailscale, put `BIND_ADDRESS=0.0.0.0` in
-`.env` and recreate the container (`docker compose up -d`); the site is then at
-`http://<pi-ip>:8000`. That is plain HTTP, so the password and the session travel
-unencrypted on that network: only on a network you trust, and never forward the
-port on the router. Docker publishes the port around `ufw`, so the firewall does
-not filter it.
+- **Behind a reverse proxy with HTTPS** (recommended, and the only option for access
+  over the internet): any proxy that terminates TLS and forwards to
+  `http://127.0.0.1:8000`. It should keep the `Host` header (or send
+  `X-Forwarded-Host`) and send `X-Forwarded-Proto: https`; the session cookie is then
+  marked `Secure`.
+- **On a trusted local network, over plain HTTP**: set `BIND_ADDRESS=0.0.0.0` in `.env`
+  and run `docker compose up -d`; the site is at `http://<machine-ip>:8000`. The
+  password and the session travel unencrypted, so never forward that port on a router.
+  Docker publishes ports past host firewalls such as `ufw`.
+
+POSTs from other sites are refused (`Sec-Fetch-Site`, or `Origin` against the host),
+and sign-in attempts are throttled.
 
 ## Sources and their terms
 
@@ -147,3 +178,7 @@ Each connector follows its source's terms, recorded in its docstring:
   every job links back to We Work Remotely, as its feed page asks.
 
 Sources whose terms forbid aggregation are not supported.
+
+## License
+
+[MIT](LICENSE)

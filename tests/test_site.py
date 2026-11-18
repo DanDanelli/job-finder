@@ -137,7 +137,7 @@ def test_login_and_logout(engine: Engine, client: TestClient) -> None:
     ("base_url", "headers", "secure"),
     [
         ("https://pi.example", {}, True),
-        ("http://pi.example", {"x-forwarded-proto": "https"}, True),  # tailscale serve
+        ("http://jobs.example", {"x-forwarded-proto": "https"}, True),  # behind a reverse proxy
         ("http://192.168.0.10:8000", {}, False),  # home network, plain HTTP
     ],
 )
@@ -210,11 +210,11 @@ def test_cross_origin_posts_are_refused(engine: Engine, client: TestClient) -> N
 @pytest.mark.parametrize(
     ("headers", "status"),
     [
-        # what Safari/Chrome send for a form on the page itself, behind tailscale serve
-        ({"Sec-Fetch-Site": "same-origin", "Origin": "https://pi.ts.net:8443"}, 303),
+        # what Safari/Chrome send for a form on the page itself, behind a reverse proxy
+        ({"Sec-Fetch-Site": "same-origin", "Origin": "https://jobs.example.com:8443"}, 303),
         ({"Sec-Fetch-Site": "none"}, 303),  # typed or bookmarked
         ({"Sec-Fetch-Site": "cross-site", "Origin": "http://testserver"}, 403),
-        ({"Sec-Fetch-Site": "same-site"}, 403),  # another service on the same tailnet name
+        ({"Sec-Fetch-Site": "same-site"}, 403),  # another service on the same parent domain
         ({"Origin": "null"}, 403),
     ],
 )
@@ -237,8 +237,8 @@ def test_proxy_forwarded_host_counts_as_same_origin(engine: Engine, client: Test
         "/login",
         data={"username": "alice", "password": PASSWORD},
         headers={
-            "Origin": "https://pi.tailnet.ts.net:8443",
-            "X-Forwarded-Host": "pi.tailnet.ts.net:8443",
+            "Origin": "https://jobs.example.com:8443",
+            "X-Forwarded-Host": "jobs.example.com:8443",
         },
     )
     assert r.status_code == 303

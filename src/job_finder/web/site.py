@@ -61,7 +61,7 @@ def _same_origin(request: Request) -> bool:
 
 def _https(request: Request) -> bool:
     """The browser reached the site over HTTPS, directly or through a proxy that says so
-    (tailscale serve sends X-Forwarded-Proto). Plain HTTP on the home network is not."""
+    (X-Forwarded-Proto). Plain HTTP on a local network is not."""
     forwarded = request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
     return request.url.scheme == "https" or forwarded == "https"
 

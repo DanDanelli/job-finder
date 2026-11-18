@@ -107,8 +107,9 @@ class Settings(BaseSettings):
     ]
     weworkremotely_daily_limit: int | None = 33  # three full runs
 
-    # Site. The session cookie is Secure whenever the request came over HTTPS (tailscale
-    # serve); plain HTTP on the home network gets a cookie without it. False never sets it.
+    # Site. The session cookie is Secure whenever the request came over HTTPS (directly or
+    # through a proxy); plain HTTP on a local network gets a cookie without it. False never
+    # sets it.
     web_secure_cookie: bool = True
     web_session_days: int = Field(default=30, ge=1)
     # The Dismissed tab shows the last N days of dismissals (enough to undo a mistake).
