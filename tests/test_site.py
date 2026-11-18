@@ -965,7 +965,7 @@ def test_status_shows_cost_shared_and_yours(engine: Engine, client: TestClient) 
     from job_finder.db.models import LLMCostDB
 
     me = add_profile(engine, "daniel")
-    other = add_profile(engine, "bob")
+    other = add_profile(engine, "partner")
     with session(engine) as s:
         for pid, cost in ((me, 0.25), (other, 0.5), (me, 0.25)):
             s.add(LLMCostDB(profile_id=pid, operation="scoring", model="m", cost_usd=cost))

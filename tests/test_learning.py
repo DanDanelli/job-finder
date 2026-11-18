@@ -140,9 +140,9 @@ def test_scheduler_proposes_for_due_profiles_and_tells_them(engine: Engine, db_u
     import asyncio
 
     pid = add_profile(engine, "daniel")
-    add_profile(engine, "bob")
+    add_profile(engine, "partner")
     decide(engine, "daniel", 5)
-    decide(engine, "bob", 2)  # too few
+    decide(engine, "partner", 2)  # too few
     with session(engine) as s:
         s.get_one(ProfileDB, pid).telegram_chat_id = 42
     sent = Sent()
@@ -227,7 +227,7 @@ def test_site_discard_keeps_the_rules_in_use(engine: Engine, site: tuple[TestCli
 def test_rules_are_per_profile(engine: Engine, site: tuple[TestClient, Any]) -> None:
     client, _ = site
     add_profile(engine, "daniel")
-    other = add_profile(engine, "bob")
+    other = add_profile(engine, "partner")
     learner.approve(engine, other, ["Her rule"])
     login(client, "daniel", PASSWORD)
     assert "Her rule" not in client.get("/learned").text
