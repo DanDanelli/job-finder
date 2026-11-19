@@ -107,58 +107,21 @@ Only one copy of the app may run with a given bot token: Telegram delivers each 
 a single listener. Don't run `job-finder serve` on your laptop with the same token while
 the server is up.
 
-## 6. Link your Telegram chat
+## 6. Create your profile
 
-Open your bot in Telegram and send `/start`. Since no profile knows your chat yet, it
-replies with your **chat id**, a number. Keep it for the next step.
-
-Everyone who will use this installation does the same with the same bot.
-
-## 7. Create your profile
-
-A profile says what to search, what to rule out, and who you are. Start from the example:
+Each person is a profile: their name is also the site username.
 
 ```bash
-mkdir -p data/profiles
-cp profiles/example.yaml data/profiles/me.yaml
+docker compose exec job-finder job-finder profile create alex
 ```
 
-Edit `data/profiles/me.yaml`:
+It asks for a password twice (at least 8 characters). Everything else is done on the site.
+Without an interactive terminal, pipe the password in with `--stdin`.
 
-- `name`: a short login name, e.g. `alex`.
-- `telegram_chat_id`: the number from step 6.
-- `queries`: the job titles to search for, 4 to 8 of them, in the languages jobs are
-  posted in (e.g. both "Cloud Architect" and "Arquiteto de Cloud" in Brazil). `countries`
-  limits a query to some countries; empty means worldwide.
-- `filters`: the hard rules, applied before Claude sees anything:
-  - `countries`: where you accept onsite or hybrid jobs;
-  - `remote_from`: the country you live in, so remote jobs must accept people from there;
-  - `work_modes`, `contract_types`;
-  - `min_salary`, or `min_salary_by_contract` for a different minimum per contract type;
-  - `blocked_companies`, `blocked_keywords`, `max_age_days`.
-- `preferences`: a few sentences in plain words for Claude ("I prefer product companies
-  over consultancies").
-- `data`: leave the example's or delete the block. Step 9 fills it from your CV.
+## 7. Open the site
 
-Load it:
-
-```bash
-docker compose exec job-finder job-finder profile load /data/profiles/me.yaml
-```
-
-Send `/start` to the bot again: it now greets you by name and lists the commands.
-
-Later changes are easier on the site (**Profile** page). Loading the YAML again overwrites
-searches and filters, but keeps what was read from the CV if the file has no `data`.
-
-## 8. Set your password and open the site
-
-```bash
-docker compose exec job-finder job-finder profile password alex
-```
-
-The site is at `http://localhost:8000` on the machine itself. Sign in with the profile
-name and that password. To open it from other devices:
+The site is at `http://localhost:8000` on the machine itself. Sign in with the profile name
+and password. To open it from other devices:
 
 **On your local network.** Add `BIND_ADDRESS=0.0.0.0` to `.env` and run
 `docker compose up -d`. The site is then at `http://<machine-ip>:8000`. This is plain HTTP:
@@ -171,18 +134,39 @@ publishes the port past host firewalls such as `ufw`, so they will not filter it
 session cookie is marked `Secure`. Put the public address in `.env` as
 `JOBFINDER_SITE_URL`, so Telegram messages can link to the site.
 
+## 8. Link Telegram
+
+On the site, open **Account** and choose **Link Telegram**. Then either tap **Open in
+Telegram**, which opens your bot with the code filled in (press **Start**), or send the bot
+the `/start <code>` message shown on the page. The code works once and lasts 15 minutes.
+
+The bot replies that the chat is linked and lists its commands. Everyone who uses this
+installation links their own chat to their own profile, with the same bot.
+
 ## 9. Read your CV
 
-On the site, go to **CV** and upload a PDF. Claude reads it in the background (a minute or
-so) and shows what it extracted: summary, roles, seniority, skills, languages, industries,
-certifications and suggested searches. Fix anything wrong, then save. Nothing changes in
-your profile until you do.
+Open **CV** and upload a PDF. Claude reads it in the background (a minute or so) and shows
+what it extracted: summary, roles, seniority, skills, languages, industries, certifications
+and suggested searches. Fix anything wrong, tick the searches you want, then save. Nothing
+changes in your profile until you do.
 
-The same form edits that data at any time. From the terminal, the equivalent is to put
-the PDF in `data/` and run
-`docker compose exec job-finder job-finder profile import /data/cv.pdf -p alex`.
+The same form edits that data at any time.
 
-## 10. First search
+## 10. Searches and filters
+
+Open **Profile** and check:
+
+- **Searches**: the job titles to look for, 4 to 8 of them, in the languages jobs are
+  posted in (e.g. both "Cloud Architect" and "Arquiteto de Cloud" in Brazil). Each can be
+  limited to some countries; empty means worldwide.
+- **Filters**: the hard rules, applied before Claude sees anything: where you accept
+  onsite or hybrid jobs, the country remote jobs must accept people from, work modes,
+  contract types, minimum salary (overall or per contract type), blocked companies and
+  keywords, and how old a posting may be.
+- **Preferences for Claude**: a few sentences in plain words ("I prefer product companies
+  over consultancies").
+
+## 11. First search
 
 On the **Jobs** page, click **Search now**. **Status** shows what it is doing. The first run
 takes a few minutes: it reads every source and scores the top 30 jobs for you.
@@ -196,7 +180,7 @@ docker compose exec job-finder job-finder digest -p alex
 
 From then on, it runs by itself at `JOBFINDER_RUN_TIMES`.
 
-## 11. Teach it your taste
+## 12. Teach it your taste
 
 This part makes the digest get better over time:
 
@@ -210,7 +194,7 @@ This part makes the digest get better over time:
   once you approve them.
 - `/evaluate <link>` on Telegram scores any job you found elsewhere.
 
-## 12. Keep it running
+## 13. Keep it running
 
 **Backups.** The app copies the database every day at 03:30 and keeps 7 days. By default
 the copies land in `data/backup`, on the same disk. Point them to another disk with
@@ -229,6 +213,21 @@ page shows when one is going.
 
 **Logs.** `docker compose logs --since 1h`. Each run's warnings (a source down, a quota
 reached) also show on **Status** and at the end of the digest.
+
+## Profiles in YAML (optional)
+
+To keep profiles in files, or to set up several at once, write them in YAML: start from
+[`profiles/example.yaml`](../profiles/example.yaml), put the file in `data/profiles/`, and run
+
+```bash
+docker compose exec job-finder job-finder profile load /data/profiles/me.yaml
+docker compose exec job-finder job-finder profile password alex
+```
+
+`telegram_chat_id` in the file links the chat directly: send `/start` to the bot from an
+unlinked chat and it replies with the chat's id. Loading a file again overwrites searches
+and filters, but keeps what was read from the CV if the file has no `data`.
+`job-finder profile export alex` prints a profile in the same format.
 
 ## Costs
 
@@ -255,7 +254,7 @@ per day and month for each source (see **Status**).
 |---|---|
 | Container restarts, "permission denied" on `/data` | `./data` belongs to root: `sudo chown -R 1000:1000 data`. |
 | The bot does not answer at all | Token in `.env`; `docker compose logs` for Telegram errors; no other copy of the app polling with the same token. |
-| `/start` keeps returning the chat id | `telegram_chat_id` in your YAML is wrong or the profile was not loaded (step 7). |
+| "This link code is wrong or has expired" | Codes last 15 minutes, work once, and do not survive a restart: make a new one under **Account**. |
 | No jobs, or very few | **Status** for source errors; queries too narrow or filters too strict; `docker compose exec job-finder job-finder run --dry-run -p alex` shows what passes the filters without writing anything (it does query the sources, so it counts toward their daily limits). |
 | Jobs found but nothing on Telegram | Their scores are below `JOBFINDER_DIGEST_MIN_SCORE`: they are still on the site. |
 | "Monthly cap reached" | Raise `JOBFINDER_MONTHLY_COST_CAP_USD`, or wait for next month. |

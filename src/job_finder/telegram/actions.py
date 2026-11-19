@@ -38,6 +38,20 @@ def profile_for_chat(engine: Engine, chat_id: int) -> ChatProfile | None:
         return ChatProfile(p.id, p.name, p.paused) if p else None
 
 
+def link_chat(engine: Engine, chat_id: int, profile_id: int) -> ChatProfile | None:
+    """Links the chat to the profile (replacing the profile's previous chat). None when
+    the chat already belongs to another profile."""
+    with session(engine) as s:
+        owner = repo.profile_for_chat(s, chat_id)
+        if owner is not None and owner.id != profile_id:
+            return None
+        p = s.get(ProfileDB, profile_id)
+        if p is None:
+            return None
+        p.telegram_chat_id = chat_id
+        return ChatProfile(p.id, p.name, p.paused)
+
+
 @dataclass(frozen=True)
 class FeedbackResult:
     match_id: int

@@ -33,6 +33,7 @@ from job_finder.llm.client import LLMClient
 from job_finder.llm.profile_extractor import ProfileExtraction
 from job_finder.scheduler import Scheduler, next_run
 from job_finder.telegram.digest import PERIODS, SOURCE_NAMES, WORK_MODES, short_places
+from job_finder.telegram.linking import TelegramLinks
 from job_finder.web import auth, cv, data, forms, status
 
 log = logging.getLogger(__name__)
@@ -105,9 +106,12 @@ def mount_site(
     *,
     extract: cv.Extractor | None = None,
     llm: Callable[[], LLMClient] | None = None,
+    links: TelegramLinks | None = None,
 ) -> None:
-    """`extract` and `llm` replace the real Claude calls (tests)."""
+    """`extract` and `llm` replace the real Claude calls (tests). `links` is shared with
+    the bot, which redeems the codes made on the Account page."""
     lang = settings.language
+    links = links or TelegramLinks()
     templates = Jinja2Templates(directory=HERE / "templates")
     throttle = auth.LoginThrottle()
     router = APIRouter()
@@ -574,12 +578,52 @@ def mount_site(
 
     # --- account -----------------------------------------------------------------------
 
-    @router.get("/account", response_class=HTMLResponse)
-    def account_view(request: Request, profile: Profile, changed: int = 0) -> HTMLResponse:
-        notice = tr("web.account.changed") if changed else None
-        return page(
-            request, "account.html", profile=profile, nav="account", notice=notice, error=None
+    def account_page(
+        request: Request,
+        profile: ProfileDB,
+        *,
+        notice: str | None = None,
+        error: str | None = None,
+        status_code: int = 200,
+    ) -> HTMLResponse:
+        code = links.pending(profile.id, now())
+        response = page(
+            request,
+            "account.html",
+            profile=profile,
+            nav="account",
+            notice=notice,
+            error=error,
+            bot=links.bot_username,
+            link_code=code,
+            deep_link=links.deep_link(code) if code else None,
         )
+        response.status_code = status_code
+        return response
+
+    @router.get("/account", response_class=HTMLResponse)
+    def account_view(
+        request: Request, profile: Profile, changed: int = 0, unlinked: int = 0
+    ) -> HTMLResponse:
+        notice = None
+        if changed:
+            notice = tr("web.account.changed")
+        elif unlinked:
+            notice = tr("web.telegram.unlinked")
+        return account_page(request, profile, notice=notice)
+
+    @router.post("/account/telegram")
+    def telegram_link(profile: Profile) -> Response:
+        if links.bot_username is not None:
+            links.new(profile.id, now())
+        return RedirectResponse("/account#telegram", status_code=303)
+
+    @router.post("/account/telegram/unlink")
+    def telegram_unlink(profile: Profile) -> Response:
+        links.discard(profile.id)
+        with session(engine) as s:
+            s.get_one(ProfileDB, profile.id).telegram_chat_id = None
+        return RedirectResponse("/account?unlinked=1#telegram", status_code=303)
 
     @router.post("/account", response_class=HTMLResponse)
     def account_save(
@@ -590,16 +634,7 @@ def mount_site(
         repeat: Annotated[str, Form()] = "",
     ) -> Response:
         def fail(message: str, code: int) -> HTMLResponse:
-            response = page(
-                request,
-                "account.html",
-                profile=profile,
-                nav="account",
-                notice=None,
-                error=message,
-            )
-            response.status_code = code
-            return response
+            return account_page(request, profile, error=message, status_code=code)
 
         key = profile.name.lower()
         if throttle.blocked(key):

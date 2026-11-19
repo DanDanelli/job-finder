@@ -42,9 +42,19 @@ MESSAGES: dict[str, dict[str, str]] = {
         "button.open": "🔗 Open",
         # commands
         "start.unknown": (
-            "Hi! This chat is not linked to a profile yet.\n"
-            "chat_id: <code>{chat_id}</code>\n"
-            "Put this number in <code>telegram_chat_id</code> in the profile's YAML."
+            "Hi! This chat is not linked to a profile yet. Sign in to the site, open "
+            "<b>Account</b> and choose <b>Link Telegram</b>.\n\n"
+            "If you set up profiles in YAML instead, this chat's id is "
+            "<code>{chat_id}</code> (<code>telegram_chat_id</code>)."
+        ),
+        "start.linked": "✅ This chat is now linked to your profile.",
+        "start.bad_code": (
+            "This link code is wrong or has expired (they last 15 minutes and work once). "
+            "Make a new one on the site, under <b>Account</b>."
+        ),
+        "start.taken": (
+            "This chat is already linked to another profile. Unlink it on the site first "
+            "(<b>Account</b>, signed in as that profile)."
         ),
         "start.known": "Hi, {name}! Digest at {times}.\n{commands}\n\n{how}",
         "search.busy": "A run is already in progress; the digest arrives when it ends.",
@@ -264,6 +274,21 @@ MESSAGES: dict[str, dict[str, str]] = {
         "web.account.wrong_current": "The current password is wrong.",
         "web.account.mismatch": "The two new passwords differ.",
         "web.account.too_short": "The new password needs at least {n} characters.",
+        "web.telegram.title": "Telegram",
+        "web.telegram.linked": "Linked: the digest and the bot's replies go to your chat.",
+        "web.telegram.not_linked": "Not linked yet, so no digest reaches you.",
+        "web.telegram.link": "Link Telegram",
+        "web.telegram.relink": "Link another chat",
+        "web.telegram.unlink": "Unlink",
+        "web.telegram.open": "Open in Telegram",
+        "web.telegram.manual": "Or send this message to the bot:",
+        "web.telegram.expires": "The code works once, until {time}.",
+        "web.telegram.done": "Sent it? Reload this page.",
+        "web.telegram.no_bot": (
+            "The Telegram bot is not running (no JOBFINDER_TELEGRAM_BOT_TOKEN), so there is "
+            "nothing to link yet."
+        ),
+        "web.telegram.unlinked": "Telegram unlinked. No more digests until you link it again.",
         "web.learned.title": "Learned from your feedback",
         "web.learned.intro": (
             "Rules Claude found in the jobs you saved and dismissed. Once you approve "
@@ -366,9 +391,19 @@ MESSAGES: dict[str, dict[str, str]] = {
         "button.dismissed": "🗑 Descartada",
         "button.open": "🔗 Abrir",
         "start.unknown": (
-            "Olá! Este chat ainda não está ligado a um perfil.\n"
-            "chat_id: <code>{chat_id}</code>\n"
-            "Coloque esse número em <code>telegram_chat_id</code> no YAML do perfil."
+            "Olá! Este chat ainda não está ligado a um perfil. Entre no site, abra "
+            "<b>Conta</b> e escolha <b>Ligar Telegram</b>.\n\n"
+            "Se você configura os perfis por YAML, o id deste chat é "
+            "<code>{chat_id}</code> (<code>telegram_chat_id</code>)."
+        ),
+        "start.linked": "✅ Este chat agora está ligado ao seu perfil.",
+        "start.bad_code": (
+            "Este código de ligação está errado ou expirou (vale por 15 minutos e uma vez "
+            "só). Gere outro no site, em <b>Conta</b>."
+        ),
+        "start.taken": (
+            "Este chat já está ligado a outro perfil. Desligue-o no site antes "
+            "(<b>Conta</b>, entrando com aquele perfil)."
         ),
         "start.known": "Olá, {name}! Digest às {times}.\n{commands}\n\n{how}",
         "search.busy": "Já tem uma rodada em andamento; o digest chega ao fim dela.",
@@ -593,6 +628,21 @@ MESSAGES: dict[str, dict[str, str]] = {
         "web.account.wrong_current": "A senha atual está errada.",
         "web.account.mismatch": "As duas senhas novas são diferentes.",
         "web.account.too_short": "A nova senha precisa de pelo menos {n} caracteres.",
+        "web.telegram.title": "Telegram",
+        "web.telegram.linked": "Ligado: o resumo e as respostas do bot vão para o seu chat.",
+        "web.telegram.not_linked": "Ainda não ligado, então nenhum resumo chega até você.",
+        "web.telegram.link": "Ligar Telegram",
+        "web.telegram.relink": "Ligar outro chat",
+        "web.telegram.unlink": "Desligar",
+        "web.telegram.open": "Abrir no Telegram",
+        "web.telegram.manual": "Ou mande esta mensagem ao bot:",
+        "web.telegram.expires": "O código vale uma vez, até {time}.",
+        "web.telegram.done": "Mandou? Recarregue esta página.",
+        "web.telegram.no_bot": (
+            "O bot do Telegram não está rodando (falta JOBFINDER_TELEGRAM_BOT_TOKEN), então "
+            "ainda não há o que ligar."
+        ),
+        "web.telegram.unlinked": "Telegram desligado. Sem resumos até ligar de novo.",
         "web.learned.title": "Aprendido com seu feedback",
         "web.learned.intro": (
             "Regras que o Claude encontrou nas vagas que você salvou e descartou. Depois "

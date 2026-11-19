@@ -9,8 +9,8 @@ single Docker container with SQLite, so a small machine is enough.
 
 ## How it works
 
-1. `job-finder profile import cv.pdf -p <name>` reads the CV with Claude and
-   fills in the profile (skills, roles, suggested search queries).
+1. You upload your CV on the site; Claude reads it and fills in the profile (skills,
+   roles, suggested search queries) for you to review.
 2. Each run collects jobs from the enabled sources (Remotive, Remote OK,
    Himalayas, JSearch, Adzuna, We Work Remotely),
    normalizes and deduplicates them, applies the profile's hard filters and
@@ -52,8 +52,12 @@ cp .env.example .env        # at least ANTHROPIC_API_KEY and JOBFINDER_TELEGRAM_
 docker compose up -d --build
 ```
 
-Then link your Telegram chat, create a profile, set a password and upload your CV:
-[docs/setup.md](docs/setup.md) walks through it.
+Then create a profile and finish it on the site: upload your CV, review the searches and
+filters, link Telegram. [docs/setup.md](docs/setup.md) walks through it.
+
+```bash
+docker compose exec job-finder job-finder profile create <name>   # asks for a password
+```
 
 The database lives in `./data` and migrations run on startup. The app copies the
 database every day at 03:30 (and on start when today's copy is missing), keeping the
@@ -84,8 +88,9 @@ are most likely to change:
 
 Each person is a profile: search terms, hard filters (countries, remote eligibility,
 work modes, contract types, minimum salary, blocked companies and keywords) and free-text
-preferences for Claude. Start from [`profiles/example.yaml`](profiles/example.yaml);
-after that, everything is editable on the site.
+preferences for Claude, all edited on the site. Profiles can also live in YAML files
+(`job-finder profile load`, `profile export`); see
+[`profiles/example.yaml`](profiles/example.yaml).
 
 ## Development
 
@@ -104,14 +109,14 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy
 ## The site
 
 Each profile signs in with its own name and password and sees only its own
-data. There is no sign-up: the first password is set from the terminal; after
-that, each person can change their own under **Account** (the other devices
-are signed out).
+data. There is no sign-up: `profile create` makes the profile and its first password
+from the terminal (`profile password` resets one); after that, each person can change
+their own under **Account** (the other devices are signed out).
 
 ```bash
-docker compose exec job-finder job-finder profile password <name>
+docker compose exec job-finder job-finder profile create <name>
 # or, without an interactive terminal:
-printf '%s\n' "$PASSWORD" | docker compose exec -T job-finder job-finder profile password <name> --stdin
+printf '%s\n' "$PASSWORD" | docker compose exec -T job-finder job-finder profile create <name> --stdin
 ```
 
 Pages:
@@ -135,6 +140,9 @@ Pages:
   you review what it extracted (summary, roles, seniority, skills, languages,
   industries, certifications, suggested searches) before anything changes.
   The same form edits that data at any time.
+- **Account**: password, and linking Telegram: **Link Telegram** makes a one-time code
+  (15 minutes) and a t.me link that sends it to the bot as `/start <code>`. **Unlink**
+  stops the digest.
 - **Status**: what a running search is doing (the page refreshes itself), how
   the last one went, each source's requests today and this month against its
   limits, recent runs with their warnings, and Claude's spend this month

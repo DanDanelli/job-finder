@@ -1,7 +1,7 @@
 # Example profile. Copy it to profiles/<name>.yaml (ignored by git) and adjust it.
 # `job-finder profile import <cv.pdf> -p <name>` fills `data` (and suggests queries) from a CV.
 name: example
-telegram_chat_id: null   # send /start to the bot to get it
+telegram_chat_id: null   # or link it on the site (Account); /start from an unlinked chat shows the id
 
 queries:
   - term: Cloud Architect

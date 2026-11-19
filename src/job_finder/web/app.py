@@ -14,6 +14,7 @@ from job_finder.config import Settings, get_settings
 from job_finder.db.session import make_engine
 from job_finder.llm.client import LLMClient
 from job_finder.scheduler import Scheduler
+from job_finder.telegram.linking import TelegramLinks
 from job_finder.web.cv import Extractor
 
 log = logging.getLogger(__name__)
@@ -21,7 +22,7 @@ log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def _services(
-    settings: Settings, engine: Engine, scheduler: Scheduler
+    settings: Settings, engine: Engine, scheduler: Scheduler, links: TelegramLinks
 ) -> AsyncIterator[None]:
     """Bot (if there is a token) + scheduled runs. Without a token, runs happen with no
     digest. With scheduling disabled, neither starts; the site can still run searches."""
@@ -44,8 +45,9 @@ async def _services(
     if bot_app is not None:
         from job_finder.telegram.bot import register_handlers
 
-        register_handlers(bot_app, engine, settings, scheduler)
+        register_handlers(bot_app, engine, settings, scheduler, links)
         await bot_app.initialize()
+        links.bot_username = bot_app.bot.username  # known after initialize (getMe)
         await bot_app.start()
         assert bot_app.updater is not None
         await bot_app.updater.start_polling()
@@ -79,17 +81,19 @@ def create_app(
     settings = settings or get_settings()
     engine = make_engine(settings.resolved_database_url)
     scheduler = Scheduler(engine, settings, None)
+    links = TelegramLinks()
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        async with _services(settings, engine, scheduler):
+        async with _services(settings, engine, scheduler, links):
             yield
 
     app = FastAPI(title="Job Finder", version=__version__, lifespan=lifespan)
+    app.state.telegram_links = links
 
     from job_finder.web.site import mount_site
 
-    mount_site(app, engine, settings, scheduler, extract=extract, llm=llm)
+    mount_site(app, engine, settings, scheduler, extract=extract, llm=llm, links=links)
 
     @app.get("/health")
     def health() -> dict[str, str]:

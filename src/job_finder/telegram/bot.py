@@ -7,6 +7,7 @@ except /start, which replies with the chat_id for sign-up.
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Coroutine, Sequence
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import Engine
@@ -28,6 +29,7 @@ from job_finder.scheduler import Scheduler
 from job_finder.telegram import actions
 from job_finder.telegram.actions import ChatProfile
 from job_finder.telegram.digest import Button, job_buttons
+from job_finder.telegram.linking import TelegramLinks
 
 log = logging.getLogger(__name__)
 
@@ -91,7 +93,9 @@ def register_handlers(
     engine: Engine,
     settings: Settings,
     scheduler: Scheduler,
+    links: TelegramLinks | None = None,
 ) -> None:
+    """`links` holds the site's one-time codes: `/start <code>` links the chat."""
     lang = settings.language
 
     def authorized(handler: Handler) -> Callable[[Update, Context], Coroutine[Any, Any, None]]:
@@ -117,6 +121,19 @@ def register_handlers(
         chat = update.effective_chat
         if chat is None:
             return
+        linked = ""
+        code = context.args[0] if context.args else None
+        if code is not None and links is not None:
+            profile_id = links.redeem(code, datetime.now(UTC))
+            if profile_id is None:
+                await reply(update, t(lang, "start.bad_code"))
+                return
+            owner = await asyncio.to_thread(actions.link_chat, engine, chat.id, profile_id)
+            if owner is None:
+                await reply(update, t(lang, "start.taken"))
+                return
+            log.info("Telegram chat linked to profile %s", owner.name)
+            linked = t(lang, "start.linked") + "\n\n"
         profile = await asyncio.to_thread(actions.profile_for_chat, engine, chat.id)
         if profile is None:
             log.info("/start from an unregistered chat: %s (%s)", chat.id, chat.full_name)
@@ -127,7 +144,8 @@ def register_handlers(
         )
         await reply(
             update,
-            t(
+            linked
+            + t(
                 lang,
                 "start.known",
                 name=profile.name,

@@ -1,6 +1,7 @@
 """Command line: `job-finder ...`."""
 
 import logging
+import re
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -17,7 +18,7 @@ from job_finder.config import get_settings
 from job_finder.db import repo
 from job_finder.db import session as db_session
 from job_finder.db.models import ProfileDB
-from job_finder.domain import Job
+from job_finder.domain import Job, Profile
 
 if TYPE_CHECKING:
     from job_finder.llm.model_eval import EvalReport
@@ -133,7 +134,7 @@ def profile_import(
     """Reads the CV with Claude and fills in the profile's data and queries."""
     import shutil
 
-    from job_finder.domain import Profile, Query
+    from job_finder.domain import Query
     from job_finder.llm.client import make_client
     from job_finder.llm.profile_extractor import extract_profile
 
@@ -209,34 +210,69 @@ def _clean_password(raw: str) -> str:
     return raw.strip("\r\n")
 
 
+def _read_password(stdin: bool) -> str:
+    """The new password, from stdin's first line or typed twice (never echoed)."""
+    import sys
+
+    if stdin:
+        return _clean_password(sys.stdin.readline())
+    password = _clean_password(typer.prompt("New password", hide_input=True))
+    again = _clean_password(typer.prompt("Repeat it", hide_input=True))
+    if again != password:
+        raise typer.BadParameter(
+            f"the two entries differ ({len(password)} and {len(again)} characters)"
+        )
+    return password
+
+
+def _hash_password(password: str) -> str:
+    from job_finder.web import auth
+
+    try:
+        return auth.hash_password(password)
+    except ValueError as e:
+        raise typer.BadParameter(str(e)) from None
+
+
+StdinOption = Annotated[
+    bool, typer.Option("--stdin", help="Read the password from the first line of stdin.")
+]
+PROFILE_NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
+
+
+@profile_app.command("create")
+def profile_create(
+    name: Annotated[str, typer.Argument(help="Profile name, also the site username.")],
+    stdin: StdinOption = False,
+) -> None:
+    """Creates an empty profile and sets its site password. The rest is done on the site:
+    CV, searches, filters and linking Telegram."""
+    if not PROFILE_NAME.fullmatch(name):
+        raise typer.BadParameter(
+            "use lowercase letters, digits, '.', '_' or '-' (up to 64 characters)"
+        )
+    engine = _engine()
+    with db_session.session(engine, commit=False) as s:
+        if repo.find_profile(s, name) is not None:
+            raise typer.BadParameter(f"profile '{name}' already exists")
+    hashed = _hash_password(_read_password(stdin))
+    with db_session.session(engine) as s:
+        repo.save_profile(s, Profile(name=name)).password_hash = hashed
+    typer.echo(f"Profile '{name}' created. Sign in to the site as '{name}' to finish it.")
+
+
 @profile_app.command("password")
 def profile_password(
     name: Annotated[str, typer.Argument(help="Profile name (also the site username).")],
-    stdin: Annotated[
-        bool, typer.Option("--stdin", help="Read the password from the first line of stdin.")
-    ] = False,
+    stdin: StdinOption = False,
 ) -> None:
     """Sets the profile's site password (asked twice, never echoed). Signs out its
     open sessions."""
-    import sys
-
     from job_finder.web import auth
 
     engine = _engine()
     profile_id = _profile_id(engine, name)
-    if stdin:
-        password = _clean_password(sys.stdin.readline())
-    else:
-        password = _clean_password(typer.prompt("New password", hide_input=True))
-        again = _clean_password(typer.prompt("Repeat it", hide_input=True))
-        if again != password:
-            raise typer.BadParameter(
-                f"the two entries differ ({len(password)} and {len(again)} characters)"
-            )
-    try:
-        hashed = auth.hash_password(password)
-    except ValueError as e:
-        raise typer.BadParameter(str(e)) from None
+    hashed = _hash_password(_read_password(stdin))
     with db_session.session(engine) as s:
         s.get_one(ProfileDB, profile_id).password_hash = hashed
         auth.end_all_sessions(s, profile_id)

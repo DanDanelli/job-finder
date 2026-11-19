@@ -4,6 +4,32 @@
 <h1>{{ t("web.nav.account") }}: {{ profile.name }}</h1>
 {% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+<section id="telegram" class="card narrow">
+  <h2>{{ t("web.telegram.title") }}</h2>
+  {% if profile.telegram_chat_id %}
+  <p>{{ t("web.telegram.linked") }}</p>
+  {% else %}
+  <p class="muted">{{ t("web.telegram.not_linked") }}</p>
+  {% endif %}
+  {% if not bot %}
+  <p class="muted">{{ t("web.telegram.no_bot") }}</p>
+  {% elif link_code %}
+  <p><a class="button" href="{{ deep_link }}" target="_blank" rel="noopener">{{ t("web.telegram.open") }}</a></p>
+  <p>{{ t("web.telegram.manual") }} <code>/start {{ link_code.code }}</code><br>
+    <small class="muted">{{ t("web.telegram.expires", time=when(link_code.expires)) }}
+    <a href="/account#telegram">{{ t("web.telegram.done") }}</a></small></p>
+  {% else %}
+  <form method="post" action="/account/telegram">
+    <button type="submit"{% if profile.telegram_chat_id %} class="secondary"{% endif %}>
+      {{ t("web.telegram.relink" if profile.telegram_chat_id else "web.telegram.link") }}</button>
+  </form>
+  {% endif %}
+  {% if profile.telegram_chat_id %}
+  <form method="post" action="/account/telegram/unlink">
+    <button type="submit" class="link">{{ t("web.telegram.unlink") }}</button>
+  </form>
+  {% endif %}
+</section>
 <form method="post" action="/account" class="card narrow">
   <h2>{{ t("web.account.change") }}</h2>
   <label>{{ t("web.account.current") }}
