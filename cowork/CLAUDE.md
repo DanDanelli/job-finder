@@ -12,7 +12,10 @@ lives in the Markdown files of this folder.
 | `rules.md` | Patterns learned from the decisions | You propose, the person approves |
 
 Read `profile.md`, `rules.md` and `jobs.md` before any task below. Write to the person
-in the language `profile.md` names.
+in the language `profile.md` names. They may ask for each task in their own words and
+language: "buscar vagas" is a search, "revisão semanal" the weekly review, "criar meu
+perfil" the profile. If `profile.md` still holds the example profile, offer to create
+theirs before searching.
 
 ## Ground rules
 

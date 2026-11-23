@@ -5,6 +5,10 @@ Claude Cowork with its connectors and web tools. Claude searches when you ask (o
 schedule), scores each job against your profile, keeps your decisions and learns your
 taste from them.
 
+Download the folder:
+[job-search-cowork.zip](https://github.com/DanDanelli/job-finder/releases/latest/download/job-search-cowork.zip).
+Em português, com o passo a passo para quem não é de TI: [LEIA-ME.md](LEIA-ME.md).
+
 ## Files
 
 - `CLAUDE.md`: what Claude does and how (sources, filters, scoring, history, weekly
@@ -15,7 +19,7 @@ taste from them.
 
 ## Setup
 
-1. Copy this folder somewhere of your own (your data lives in it, so keep it out of
+1. Download and unzip the folder (or copy `cowork/`) somewhere of your own (your data lives in it, so keep it out of
    any public repository).
 2. In Claude, add the connectors you want. Indeed has an official connector (in beta)
    that covers every kind of job; Cowork's web search and web fetch cover the rest.
