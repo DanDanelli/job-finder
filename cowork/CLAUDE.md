@@ -34,7 +34,7 @@ Use every source that is available, in this order, with the searches listed in
 2. **Web search** for Brazilian and general job sites: for each search term, queries
    such as `"<term>" vaga <city>` restricted to `gupy.io`, `linkedin.com/jobs`,
    `vagas.com.br` or `infojobs.com.br`. Open a posting only when the result is promising
-   and the snippet is not enough. If a site refuses to open, use what the result shows.
+   and the snippet is not enough.
 3. **Remote job boards** (only when the profile accepts remote work), read by URL:
    - Remotive: `https://remotive.com/api/remote-jobs` (the whole catalog in one call; at
      most 4 calls a day; credit Remotive).
@@ -47,6 +47,18 @@ Use every source that is available, in this order, with the searches listed in
      `remote-programming-jobs`, `all-other-remote-jobs`; credit We Work Remotely).
 
 If a source fails, go on with the others and mention it at the end.
+
+**When a posting will not open** (LinkedIn always refuses; Greenhouse pages and
+aggregators such as Jooble often do), do not leave a promising job out:
+- Look for the same title and company where it can be read: the company's careers page,
+  Gupy, Indeed, or the public APIs of the applicant systems:
+  `https://boards-api.greenhouse.io/v1/boards/<company>/jobs/<id>` (Greenhouse; the same
+  two parts as in the `job-boards.greenhouse.io/<company>/jobs/<id>` link) and
+  `https://api.lever.co/v0/postings/<company>/<id>` (Lever). A "not found" from these
+  APIs means the job closed: drop it.
+- If nothing opens, score it from what the search result shows, conservatively, put
+  `read: snippet only` among its gaps, and keep the original link. Never just list it
+  as unread.
 
 ## Search ("search jobs", or a scheduled run)
 
@@ -61,7 +73,10 @@ If a source fails, go on with the others and mention it at the end.
 3. From what is left, pick the 25 most relevant to the profile's roles and skills and
    score each one (see Scoring). Open a job's full description first when you only have
    a snippet.
-4. Add every scored job to the top of `## Recent` in `jobs.md` (format below).
+4. Write every scored job to `jobs.md` (format below): the ones at or above the
+   profile's minimum score as full blocks at the top of `## Recent`, the others as one
+   line each at the top of `## Below minimum`. That keeps the file small and still lets
+   you skip them next time.
 5. Show the person the jobs at or above the profile's minimum score, best first: id,
    score, title, company, place, contract, salary when known, the summary, dealbreakers
    if any, and the link. Then one line with how many you collected, dropped (and why)
@@ -120,6 +135,12 @@ Two sections. Ids are `J` plus a number, one more than the highest id in the fil
 - Decision: new
 ```
 
+`## Below minimum`, one line per job scored under the profile's minimum, newest first:
+
+```
+- J43 · 2026-11-23 · 55 · Senior DevOps Analyst, Company Z · Rio de Janeiro · DevOps role, not architecture · https://link-to-the-posting
+```
+
 `## History`, one line per job, newest first:
 
 ```
@@ -130,7 +151,8 @@ Two sections. Ids are `J` plus a number, one more than the highest id in the fil
 
 When the person tells you what they think of jobs ("save J42", "dismiss the Company X
 one, it's an agency", "I applied to J40"), find each job (ask if unsure) and update its
-`Decision` line: `saved`, `applied`, `dismissed` or `closed` (the process ended), with
+`Decision` line (for a job in `## Below minimum`, first rewrite it as a block in
+`## Recent`, opening the link again if needed): `saved`, `applied`, `dismissed` or `closed` (the process ended), with
 the date and their reason in their own words: `Decision: dismissed 2026-11-24 · reason:
 agency, not in-house`. Ask for the reason when they give none; it is what teaches you
 the most, but do not insist.
@@ -153,7 +175,7 @@ Add it to `jobs.md` with `via link` only if they want to keep it.
 3. **Hit rate.** Of the decided jobs scored 70 or more, the share saved or applied.
    Report it with the number of jobs behind it.
 4. **Clean up `jobs.md`,** only after the rules step, so no reason is lost:
-   - delete jobs still `new` after 30 days;
+   - delete jobs still `new` after 30 days, and `## Below minimum` lines after 30 days;
    - delete jobs `dismissed` without a reason after 60 days;
    - after 60 days, move `saved`, `closed` and `dismissed`-with-reason jobs to
      `## History` as one line;
