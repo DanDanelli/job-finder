@@ -15,10 +15,27 @@ programar: é uma pasta com quatro arquivos de texto e o app do Claude.
 
 ### 1. Baixe a pasta
 
-1. Baixe o arquivo:
+1. Clique neste link:
    [job-search-cowork.zip](https://github.com/DanDanelli/job-finder/releases/latest/download/job-search-cowork.zip).
-2. Abra o arquivo baixado. Aparece uma pasta chamada `job-search`.
-3. Mova essa pasta para a sua pasta Documentos. Se quiser, renomeie para `vagas`.
+   O download começa sozinho; você não precisa de conta no GitHub. O arquivo vai para
+   a pasta **Downloads** (Transferências).
+2. Descompacte o arquivo:
+   - **Mac:** clique duas vezes no `job-search-cowork.zip`. Aparece, ao lado dele, uma
+     pasta chamada `job-search`.
+   - **Windows:** clique com o botão direito no `job-search-cowork.zip`, escolha
+     **Extrair tudo...** e depois **Extrair**. Aparece uma pasta chamada `job-search`.
+3. Mova a pasta `job-search` para a sua pasta **Documentos**. Se quiser, renomeie para
+   `vagas`.
+
+Se o link não baixar e você cair numa página do GitHub:
+
+1. Na página do projeto
+   ([github.com/DanDanelli/job-finder](https://github.com/DanDanelli/job-finder)), procure
+   **Releases** na coluna da direita e clique na versão mais recente.
+2. Desça até **Assets** e clique em **job-search-cowork.zip**.
+
+Não use o botão verde **Code** > **Download ZIP**: ele baixa o projeto inteiro, com
+programas que você não precisa, e não a pasta pronta.
 
 Os seus dados vão ficar nessa pasta, no seu computador. Não compartilhe a pasta com
 ninguém.
